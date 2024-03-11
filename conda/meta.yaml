@@ -1,0 +1,39 @@
+package:
+  name: cyclebane
+
+  version: {{ GIT_DESCRIBE_TAG }}
+
+source:
+  path: ..
+
+requirements:
+  build:
+    - setuptools
+    - setuptools_scm
+  run:
+    - python>=3.10
+
+test:
+  imports:
+    - cyclebane
+  requires:
+    - pytest
+  source_files:
+    - pyproject.toml
+    - tests/
+  commands:
+    # We ignore warnings during release package builds
+    - python -m pytest -Wignore tests
+
+build:
+  noarch: python
+  script:
+    - python -m pip install .
+
+about:
+  home: https://github.com/scipp/cyclebane
+  license: BSD-3-Clause
+  summary: Transform directed acyclic graphs using map-reduce and groupby operations
+  description: Transform directed acyclic graphs using map-reduce and groupby operations
+  dev_url: https://github.com/scipp/cyclebane
+  doc_url: https://scipp.github.io/cyclebane

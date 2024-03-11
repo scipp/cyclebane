@@ -1,0 +1,13 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 9c3feff
+_src_path: gh:scipp/copier_template
+description: Transform directed acyclic graphs using map-reduce and groupby operations
+max_python: '3.12'
+min_python: '3.10'
+namespace_package: ''
+nightly_deps: ''
+orgname: scipp
+prettyname: CycleBane
+projectname: cyclebane
+related_projects: Sciline
+year: 2024
