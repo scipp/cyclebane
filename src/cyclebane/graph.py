@@ -119,7 +119,6 @@ class Index:
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
-        self.labels: dict[Hashable, list[Hashable]] = {}
 
     def get_index_names(self, values) -> tuple[str]:
         if (dims := getattr(values, 'dims', None)) is not None:
@@ -185,10 +184,7 @@ class Graph:
             )
             for index in self.yield_index(index_names, shape)
         ]
-        graph = Graph(nx.compose_all(graphs))
-        # graph.labels = {**self.labels}
-        # graph.labels[index_name] = (index_name, values)
-        return graph
+        return Graph(nx.compose_all(graphs))
 
     def reduce(
         self,
@@ -196,11 +192,11 @@ class Graph:
         *,
         index: None | Hashable = None,
         axis: None | int = None,
-        func: str,
+        name: str,
+        attrs: None | dict[str, Any] = None,
     ) -> Graph:
-        """Add edges from all nodes (key, index) to new node func."""
-        # TODO Should not use func as nodename. Func should be metadata, i.e.,
-        # arbitrary attrs to store in new nodes
+        """Add edges from all nodes (key, index) to new node."""
+        attrs = attrs or {}
         if index is not None and axis is not None:
             raise ValueError('Only one of index and axis can be given')
         nodes = [
@@ -214,15 +210,15 @@ class Graph:
                 new_index = node.index.pop(index)
             elif axis is not None:
                 new_index = node.index.pop_axis(axis)
+            else:
+                new_index = IndexValues(axes=(), values=())
             new_node = (
-                func if len(new_index) == 0 else NodeName(name=func, index=new_index)
+                name if len(new_index) == 0 else NodeName(name=name, index=new_index)
             )
+            graph.add_node(new_node, **attrs)
             graph.add_edge(node, new_node)
-        graph = Graph(graph)
-        # for name, labels in self.labels.items():
-        #    if labels[0] != index:
-        #        graph.labels[name] = labels
-        return graph
+
+        return Graph(graph)
 
     def groupby(self, key: str, index: str, reduce: str) -> Graph:
         """

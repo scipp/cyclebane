@@ -69,6 +69,20 @@ def test_map_scipp_variable() -> None:
     assert a_values == list(x)
 
 
+def test_map_2d_scipp_variable() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    values = sc.array(dims=['x', 'y'], values=[[1, 2, 3], [4, 5, 6]], unit='m')
+    mapped = graph.map({'a': values})
+
+    a_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values[0:3] == list(values['x', 0])
+    assert a_values[3:6] == list(values['x', 1])
+
+
 def test_map_multiple_joint_index() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
@@ -88,13 +102,26 @@ def test_map_reduce() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
-    reduced = mapped.reduce('c', func='func', axis=1)
+    reduced = mapped.reduce('c', name='func', axis=1)
     # Axis 1 reduces 'x', so there are 3 reduce nodes.
     assert len(reduced.graph.nodes) == 20
     # Axis 0 reduces 'a', so there are 2 reduce nodes.
-    reduced = mapped.reduce('c', func='func', axis=0)
+    reduced = mapped.reduce('c', name='func', axis=0)
     assert len(reduced.graph.nodes) == 19
 
     a_data = [data for node, data in reduced.graph.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values == [1, 2, 3]
+
+
+def test_reduce_all_axes() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]}).map({'b': [4, 5]})
+    reduced = mapped.reduce('c', name='sum', attrs={'func': 'sum'})
+    # No axis or index given, all axes are reduced, so the new node has no index part.
+    assert 'sum' in reduced.graph
+    assert reduced.graph.nodes['sum'] == {'func': 'sum'}
