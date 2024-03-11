@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024 Scipp contributors (https://github.com/scipp)
 from __future__ import annotations
-from dataclasses import dataclass
 
-from typing import Hashable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, Hashable, Iterable, Mapping
 
 import networkx as nx
 
@@ -17,16 +17,14 @@ class IndexValues:
     values: tuple[IndexValue]
 
     @staticmethod
-    def from_dict(d: dict[IndexName, IndexValue]) -> IndexValues:
-        return IndexValues(axes=tuple(d.keys()), values=tuple(d.values()))
-
-    @staticmethod
     # TODO fix type hint
     def from_tuple(t: tuple[IndexName, IndexValue]) -> IndexValues:
         return IndexValues(axes=t[::2], values=t[1::2])
 
-    def push(self, name: IndexName, value: IndexValue) -> IndexValues:
-        return IndexValues(axes=self.axes + (name,), values=self.values + (value,))
+    def merge_index(self, other: IndexValues) -> IndexValues:
+        return IndexValues(
+            axes=self.axes + other.axes, values=self.values + other.values
+        )
 
     def pop(self, name: IndexName) -> IndexValues:
         i = self.axes.index(name)
@@ -57,18 +55,14 @@ class NodeName:
     name: str
     index: IndexValues
 
-    def push(self, name: IndexName, value: IndexValue) -> NodeName:
-        return NodeName(name=self.name, index=self.index.push(name, value))
+    def merge_index(self, other: IndexValues) -> NodeName:
+        return NodeName(name=self.name, index=self.index.merge_index(other))
 
     def __str__(self):
         return f'{self.name}({self.index})'
 
 
-def rename_successors(
-    graph: nx.DiGraph, *, root_nodes: tuple[Hashable], index: Hashable
-) -> nx.DiGraph:
-    """Replace 'node' and all its successors with (node, suffix), and update all edges
-    accordingly."""
+def find_successors(graph: nx.DiGraph, *, root_nodes: tuple[Hashable]) -> set[Hashable]:
     successors = set()
     for root in root_nodes:
         if root not in graph:
@@ -80,15 +74,31 @@ def rename_successors(
             set(node for node_list in nodes.values() for node in node_list)
         )
         successors.add(root)
+    return successors
+
+
+def rename_successors(
+    graph: nx.DiGraph,
+    *,
+    successors: set[Hashable],
+    index: IndexValues,
+    values: dict[Hashable, Any],
+    value_attr: str = 'value',
+) -> nx.DiGraph:
+    """Replace 'node' and all its successors with (node, suffix), and update all edges
+    accordingly."""
     renamed_nodes = {
         node: (
-            node.push(*index)
+            node.merge_index(index)
             if isinstance(node, NodeName)
-            else NodeName(name=node, index=IndexValues.from_tuple(index))
+            else NodeName(name=node, index=index)
         )
         for node in successors
     }
-    return nx.relabel_nodes(graph, renamed_nodes, copy=True)
+    relabeled = nx.relabel_nodes(graph, renamed_nodes, copy=True)
+    for root, value in values.items():
+        relabeled.nodes[renamed_nodes[root]][value_attr] = value
+    return relabeled
 
 
 def add_node_attr(
@@ -109,12 +119,9 @@ class Index:
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
-        self.index_names: tuple[str] = ()
         self.labels: dict[Hashable, list[Hashable]] = {}
 
     def get_index_names(self, values) -> tuple[str]:
-        if isinstance(values, tuple):
-            name = values[0]
         if (dims := getattr(values, 'dims', None)) is not None:
             return dims
         if (ndim := getattr(values, 'ndim', None)) is not None:
@@ -142,10 +149,18 @@ class Graph:
                 for rest in self.yield_index(index_names[1:], shape[1:]):
                     yield (index_names[0], i) + rest
 
-    # TODO add arg to store value in node attr?
+    def _get_value_at_index(self, values: Iterable[Any], index: tuple[str, int]) -> Any:
+        for label, i in zip(index[::2], index[1::2]):
+            if label is None:
+                values = values[i]
+            else:
+                # TODO this is Scipp notation? Support also Pandas and Xarray.
+                values = values[(label, i)]
+        return values
+
     def map(
         self,
-        node_values: Mapping[Hashable, Iterable[Hashable]],
+        node_values: Mapping[Hashable, Iterable[Any]],
         value_attr: str = 'value',
     ) -> Graph:
         """For every value, create a new graph with all successors renamed, merge all
@@ -154,11 +169,20 @@ class Graph:
         shapes = [self.get_shape(values) for values in node_values.values()]
         if len(set(shapes)) != 1:
             raise ValueError('All values must have the same shape')
-        values = next(iter(node_values.values()))
-        index_names = self.get_index_names(values)
+        index_names = self.get_index_names(next(iter(node_values.values())))
         shape = shapes[0]
+        successors = find_successors(self.graph, root_nodes=root_nodes)
         graphs = [
-            rename_successors(self.graph, root_nodes=root_nodes, index=index)
+            rename_successors(
+                self.graph,
+                successors=successors,
+                index=IndexValues.from_tuple(index),
+                values={
+                    root: self._get_value_at_index(vals, index)
+                    for root, vals in node_values.items()
+                },
+                value_attr=value_attr,
+            )
             for index in self.yield_index(index_names, shape)
         ]
         graph = Graph(nx.compose_all(graphs))
