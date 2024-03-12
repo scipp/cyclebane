@@ -114,22 +114,6 @@ class Graph:
         self.graph = graph
         self.index_names: set[IndexName] = set()
 
-    def _get_index_names(self, values) -> tuple[str]:
-        if (dims := getattr(values, 'dims', None)) is not None:
-            return dims
-        # 'list' also has 'index', but not 'ndim', so we use 'ndim' to check if it is,
-        # e.g., a pandas.DataFrame.
-        if (ndim := getattr(values, 'ndim', None)) is not None:
-            if (index := getattr(values, 'index', None)) is not None:
-                # TODO There can be multiple names in Pandas?
-                if index.name is not None:
-                    return (index.name,)
-        else:
-            # We do not descend into nested lists, users should use, e.g., NumPy if
-            # they want to do that.
-            ndim = 1
-        return (None,) * ndim
-
     def _get_indices(
         self, node_values: Mapping[Hashable, Sequence[Any]]
     ) -> list[tuple[IndexName], Iterable[IndexValue]]:
