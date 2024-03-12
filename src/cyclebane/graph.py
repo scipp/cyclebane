@@ -23,7 +23,7 @@ class IndexValues:
 
     def merge_index(self, other: IndexValues) -> IndexValues:
         return IndexValues(
-            axes=self.axes + other.axes, values=self.values + other.values
+            axes=other.axes + self.axes, values=other.values + self.values
         )
 
     def pop(self, name: IndexName) -> IndexValues:

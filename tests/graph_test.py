@@ -56,6 +56,21 @@ def test_map_over_list() -> None:
     assert x_values == [4, 5]
 
 
+def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]}).map({'b': [4, 5]})
+
+    reduced = mapped.reduce('c', name='sum', axis=0)
+    # Axis 0 should have length 2, so reducing us should leave us with 3 sink nodes,
+    # i.e., the ones relating to the *first* call to map.
+    sink_nodes = [node for node, degree in reduced.graph.out_degree() if degree == 0]
+    assert len(sink_nodes) == 3
+
+
 def test_map_scipp_variable() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
@@ -128,11 +143,11 @@ def test_map_reduce() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
     reduced = mapped.reduce('c', name='func', axis=1)
-    # Axis 1 reduces 'x', so there are 3 reduce nodes.
-    assert len(reduced.graph.nodes) == 20
-    # Axis 0 reduces 'a', so there are 2 reduce nodes.
-    reduced = mapped.reduce('c', name='func', axis=0)
+    # Axis 0 reduces 'x', so there are 2 reduce nodes.
     assert len(reduced.graph.nodes) == 19
+    # Axis 1 reduces 'a', so there are 3 reduce nodes.
+    reduced = mapped.reduce('c', name='func', axis=0)
+    assert len(reduced.graph.nodes) == 20
 
     a_data = [data for node, data in reduced.graph.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
