@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2023 Scipp contributors (https://github.com/scipp)
 import networkx as nx
+import pandas as pd
 import pytest
 import scipp as sc
 
@@ -78,6 +79,79 @@ def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
     # i.e., the ones relating to the *first* call to map.
     sink_nodes = [node for node, degree in reduced.graph.out_degree() if degree == 0]
     assert len(sink_nodes) == 3
+
+
+def test_map_pandas_dataframe() -> None:
+    params = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map(params)
+    assert len(mapped.graph.nodes) == 3 * 3
+
+    a_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values == params['a'].to_list()
+
+    b_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'b']
+    b_values = [data['value'] for data in b_data]
+    assert b_values == params['b'].to_list()
+
+
+def test_map_pandas_dataframe_uses_index_name() -> None:
+    params = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
+    params.index.name = 'abcde'
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map(params)
+    assert mapped.index_names == {'abcde'}
+
+
+def test_map_pandas_dataframe_uses_index_values() -> None:
+    params = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
+    params.index = [11, 22, 33]
+    params.index.name = 'abcde'
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map(params)
+    for node in mapped.graph.nodes:
+        assert node.index.axes == ('abcde',)
+        assert node.index.values[0] in [11, 22, 33]
+
+
+def test_map_pandas_dataframe_with_type_as_col_name_works() -> None:
+    # This is a slightly obscure way of naming columns, but it is used by Sciline.
+    # There is a special test for it since DataFrame.__getitem__ does not work with
+    # this kind of column name.
+    raw_params = {int: [1, 2, 3], float: [0.1, 0.2, 0.3]}
+    params = pd.DataFrame(raw_params)
+    g = nx.DiGraph()
+    g.add_edge(int, 'a')
+    g.add_edge(float, 'a')
+
+    graph = cb.Graph(g)
+    mapped = graph.map(params)
+    assert len(mapped.graph.nodes) == 3 * 3
+
+    int_data = [
+        data for node, data in mapped.graph.nodes(data=True) if node.name == int
+    ]
+    int_values = [data['value'] for data in int_data]
+    assert int_values == raw_params[int]
+
+    float_data = [
+        data for node, data in mapped.graph.nodes(data=True) if node.name == float
+    ]
+    float_values = [data['value'] for data in float_data]
+    assert float_values == raw_params[float]
 
 
 def test_map_scipp_variable() -> None:

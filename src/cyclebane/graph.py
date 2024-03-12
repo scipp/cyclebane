@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Hashable, Mapping, Sequence
+from typing import Any, Hashable, Iterable, Mapping, Sequence
 
 import networkx as nx
 
 IndexName = str | None
 IndexValue = Hashable
+
+
+def _is_pandas_series_or_dataframe(obj: Any) -> bool:
+    return str(type(obj)) in [
+        "<class 'pandas.core.frame.DataFrame'>",
+        "<class 'pandas.core.series.Series'>",
+    ]
 
 
 @dataclass(frozen=True)
@@ -110,12 +117,6 @@ def add_node_attr(
     return graph
 
 
-@dataclass
-class Index:
-    name: str
-    values: Sequence[Hashable]
-
-
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
@@ -137,22 +138,50 @@ class Graph:
             ndim = 1
         return (None,) * ndim
 
+    def _get_indices(
+        self, node_values: Mapping[Hashable, Sequence[Any]]
+    ) -> list[tuple[Hashable], Iterable[Hashable]]:
+        col_values = self._get_col_values(node_values)
+        shapes = [self._get_shape(col) for col in col_values]
+        if len(set(shapes)) != 1:
+            raise ValueError(
+                'All value sequences in a map operation must have the same shape. '
+                'Use multiple map operations if necessary.'
+            )
+        shape = shapes[0]
+
+        # TODO Catch cases where different items have different indices?
+        values = next(iter(col_values))
+        if (dims := getattr(values, 'dims', None)) is not None:
+            if hasattr(values, 'coords'):
+                return [(dim, values.coords[dim]) for dim in dims]
+            return [(dim, range(values.sizes[dim])) for dim in dims]
+        if _is_pandas_series_or_dataframe(values):
+            # TODO There can be multiple names in Pandas?
+            return [(values.index.name, values.index)]
+        else:
+            # We do not descend into nested lists, users should use, e.g., NumPy if
+            # they want to do that.
+            return [(None, range(shape[0]))]
+        return [(None, range(size)) for size in shape]
+
     def _get_shape(self, values) -> tuple[int]:
         return getattr(values, 'shape', (len(values),))
 
-    def _yield_index(self, index_names: tuple[str], shape: tuple[int]):
+    def _yield_index(self, indices: list[tuple[Hashable], Iterable[Hashable]]):
         """Given a multi-dimensional index, yield all possible combinations."""
-        if len(index_names) != len(shape):
-            raise ValueError('Length of index_names and shape must be the same')
-        for i in range(shape[0]):
-            if len(index_names) == 1:
-                yield (index_names[0], i)
+        name, index = indices[0]
+        for index_value in index:
+            if len(indices) == 1:
+                yield (name, index_value)
             else:
-                for rest in self._yield_index(index_names[1:], shape[1:]):
-                    yield (index_names[0], i) + rest
+                for rest in self._yield_index(indices[1:]):
+                    yield (name, index_value) + rest
 
-    def _get_value_at_index(self, values: Sequence[Any], index: tuple[str, int]) -> Any:
-        for label, i in zip(index[::2], index[1::2]):
+    def _get_value_at_index(
+        self, values: Sequence[Any], index_values: tuple[str, Hashable]
+    ) -> Any:
+        for label, i in zip(index_values[::2], index_values[1::2]):
             if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
                 values = values[i]
             else:
@@ -176,17 +205,8 @@ class Graph:
         """For every value, create a new graph with all successors renamed, merge all
         resulting graphs."""
         root_nodes = tuple(node_values.keys())
-        shapes = [self._get_shape(col) for col in self._get_col_values(node_values)]
-        if len(set(shapes)) != 1:
-            raise ValueError(
-                'All value sequences in a map operation must have the same shape. '
-                'Use multiple map operations if necessary.'
-            )
-        shape = shapes[0]
-        index_names = self._get_index_names(
-            next(iter(self._get_col_values(node_values)))
-        )
-        named = tuple(name for name in index_names if name is not None)
+        indices = self._get_indices(node_values)
+        named = tuple(name for name, _ in indices if name is not None)
         if any([name in self.index_names for name in named]):
             raise ValueError(
                 f'Conflicting new index names {named} with existing {self.index_names}'
@@ -203,7 +223,7 @@ class Graph:
                 },
                 value_attr=value_attr,
             )
-            for index in self._yield_index(index_names, shape)
+            for index in self._yield_index(indices=indices)
         ]
         graph = Graph(nx.compose_all(graphs))
         graph.index_names = self.index_names | set(named)
