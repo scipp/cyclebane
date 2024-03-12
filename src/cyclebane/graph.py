@@ -268,7 +268,7 @@ class Graph:
             )
             # We check self.graph, not graph, since previous iteration may have
             # inserted the node already. Note that we do need to handle multiple
-            # inserters because not all axes are reduced, in general, so there are
+            # inserts because in general not all axes are reduced, so there are
             # multiple new nodes.
             if new_node not in graph:
                 graph.add_node(new_node, **attrs)
