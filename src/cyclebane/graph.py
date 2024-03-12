@@ -266,7 +266,17 @@ class Graph:
             new_node = (
                 name if len(new_index) == 0 else NodeName(name=name, index=new_index)
             )
-            graph.add_node(new_node, **attrs)
+            # We check self.graph, not graph, since previous iteration may have
+            # inserted the node already. Note that we do need to handle multiple
+            # inserters because not all axes are reduced, in general, so there are
+            # multiple new nodes.
+            if new_node not in graph:
+                graph.add_node(new_node, **attrs)
+            elif new_node in self.graph:
+                raise ValueError(
+                    f'Node {new_node} already exists in the graph. '
+                    'Use a different name or reduce over a subset of indices/axes.'
+                )
             graph.add_edge(node, new_node)
 
         return Graph(graph)

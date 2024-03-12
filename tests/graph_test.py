@@ -290,3 +290,14 @@ def test_reduce_preserves_reduced_index_names() -> None:
     reduced = graph.reduce('b', name='sum')
     # The new node is reduced, but the graph in its entirety still has the dims.
     assert reduced.index_names == {'x', 'y'}
+
+
+def test_reduce_raises_if_new_node_name_exists() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('other', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    with pytest.raises(ValueError):
+        mapped.reduce('c', name='other')
