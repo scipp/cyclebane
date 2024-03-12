@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipp as sc
+import xarray as xr
 
 import cyclebane as cb
 
@@ -88,6 +89,17 @@ def test_map_2d_numpy_array() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': np.array([[1, 2, 3], [4, 5, 6]])})
+    assert len(mapped.graph.nodes) == 3 * 2 * 2
+
+
+def test_map_2d_xarray_dataarray() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    da = xr.DataArray(dims=('x', 'y'), data=[[1, 2, 3], [4, 5, 6]])
+    print(da, da.dims, da.shape)
+    mapped = graph.map({'a': da})
     assert len(mapped.graph.nodes) == 3 * 2 * 2
 
 

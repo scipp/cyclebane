@@ -153,7 +153,8 @@ class Graph:
         # TODO Catch cases where different items have different indices?
         values = next(iter(col_values))
         if (dims := getattr(values, 'dims', None)) is not None:
-            return [(dim, range(values.sizes[dim])) for dim in dims]
+            sizes = dict(zip(dims, values.shape))
+            return [(dim, range(sizes[dim])) for dim in dims]
         if _is_pandas_series_or_dataframe(values):
             # TODO There can be multiple names in Pandas?
             return [(values.index.name, values.index)]
@@ -178,11 +179,14 @@ class Graph:
     def _get_value_at_index(
         self, values: Sequence[Any], index_values: tuple[str, Hashable]
     ) -> Any:
-        for label, i in zip(index_values[::2], index_values[1::2]):
+        indexers = zip(index_values[::2], index_values[1::2])
+        if hasattr(values, 'isel'):
+            return values.isel(dict(indexers))
+        for label, i in indexers:
             if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
                 values = values[i]
             else:
-                # TODO This is Scipp notation, support also Xarray properly
+                # This is Scipp notation, Xarray uses the 'isel' method.
                 values = values[(label, i)]
         return values
 
