@@ -112,7 +112,7 @@ def rename_successors(
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
-        self.index_names: set[Hashable] = set()
+        self.index_names: set[IndexName] = set()
 
     def _get_index_names(self, values) -> tuple[str]:
         if (dims := getattr(values, 'dims', None)) is not None:
@@ -132,9 +132,11 @@ class Graph:
 
     def _get_indices(
         self, node_values: Mapping[Hashable, Sequence[Any]]
-    ) -> list[tuple[Hashable], Iterable[Hashable]]:
+    ) -> list[tuple[IndexName], Iterable[IndexValue]]:
         col_values = self._get_col_values(node_values)
-        shapes = [self._get_shape(col) for col in col_values]
+        # We do not descend into nested lists, users should use, e.g., NumPy if
+        # they want to do that.
+        shapes = [getattr(col, 'shape', (len(col),)) for col in col_values]
         if len(set(shapes)) != 1:
             raise ValueError(
                 'All value sequences in a map operation must have the same shape. '
@@ -145,6 +147,8 @@ class Graph:
         # TODO Catch cases where different items have different indices?
         values = next(iter(col_values))
         if (dims := getattr(values, 'dims', None)) is not None:
+            # Note that we are currently not attempting to use Xarray or Scipp coords
+            # as indices.
             sizes = dict(zip(dims, values.shape))
             return [(dim, range(sizes[dim])) for dim in dims]
         if _is_pandas_series_or_dataframe(values):
@@ -152,11 +156,6 @@ class Graph:
             return [(values.index.name, values.index)]
         else:
             return [(None, range(size)) for size in shape]
-
-    def _get_shape(self, values) -> tuple[int]:
-        # We do not descend into nested lists, users should use, e.g., NumPy if
-        # they want to do that.
-        return getattr(values, 'shape', (len(values),))
 
     def _yield_index(
         self, indices: list[tuple[IndexName, Iterable[IndexValue]]]
@@ -171,7 +170,7 @@ class Graph:
                     yield ((name, index_value),) + rest
 
     def _get_value_at_index(
-        self, values: Sequence[Any], index_values: tuple[tuple[IndexName, IndexValue]]
+        self, values: Sequence[Any], index_values: list[tuple[IndexName, IndexValue]]
     ) -> Any:
         if hasattr(values, 'isel'):
             return values.isel(dict(index_values))
