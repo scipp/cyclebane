@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Hashable, Iterable, Mapping
+from typing import Any, Hashable, Mapping, Sequence
 
 import networkx as nx
 
@@ -113,7 +113,7 @@ def add_node_attr(
 @dataclass
 class Index:
     name: str
-    values: Iterable[Hashable]
+    values: Sequence[Hashable]
 
 
 class Graph:
@@ -121,24 +121,24 @@ class Graph:
         self.graph = graph
         self.index_names: tuple[Hashable] = ()
 
-    def get_index_names(self, values) -> tuple[str]:
+    def _get_index_names(self, values) -> tuple[str]:
         if (dims := getattr(values, 'dims', None)) is not None:
             return dims
         if (ndim := getattr(values, 'ndim', None)) is not None:
             if (index := getattr(values, 'index', None)) is not None:
                 # TODO There can be multiple names in Pandas?
                 if index.name is not None:
-                    return index.name
+                    return (index.name,)
         else:
             ndim = 1  # TODO nested lists?
         return (None,) * ndim
 
-    def get_shape(self, values) -> tuple[int]:
+    def _get_shape(self, values) -> tuple[int]:
         if (shape := getattr(values, 'shape', None)) is not None:
             return shape
         return (len(values),)
 
-    def yield_index(self, index_names: tuple[str], shape: tuple[int]):
+    def _yield_index(self, index_names: tuple[str], shape: tuple[int]):
         """Given a multi-dimensional index, yield all possible combinations."""
         if len(index_names) != len(shape):
             raise ValueError('Length of index_names and shape must be the same')
@@ -146,30 +146,41 @@ class Graph:
             if len(index_names) == 1:
                 yield (index_names[0], i)
             else:
-                for rest in self.yield_index(index_names[1:], shape[1:]):
+                for rest in self._yield_index(index_names[1:], shape[1:]):
                     yield (index_names[0], i) + rest
 
-    def _get_value_at_index(self, values: Iterable[Any], index: tuple[str, int]) -> Any:
+    def _get_value_at_index(self, values: Sequence[Any], index: tuple[str, int]) -> Any:
         for label, i in zip(index[::2], index[1::2]):
-            if label is None:
+            if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
                 values = values[i]
             else:
                 # TODO this is Scipp notation? Support also Pandas and Xarray.
                 values = values[(label, i)]
         return values
 
+    def _get_col_values(
+        self, values: Mapping[Hashable, Sequence[Any]]
+    ) -> list[Sequence[Any]]:
+        if (columns := getattr(values, 'columns', None)) is not None:
+            return [values.iloc[:, i] for i in range(len(columns))]
+        return list(values.values())
+
     def map(
         self,
-        node_values: Mapping[Hashable, Iterable[Any]],
+        node_values: Mapping[Hashable, Sequence[Any]],
         value_attr: str = 'value',
     ) -> Graph:
         """For every value, create a new graph with all successors renamed, merge all
         resulting graphs."""
         root_nodes = tuple(node_values.keys())
-        shapes = [self.get_shape(values) for values in node_values.values()]
+        shapes = [
+            self._get_shape(values) for values in self._get_col_values(node_values)
+        ]
         if len(set(shapes)) != 1:
             raise ValueError('All values must have the same shape')
-        index_names = self.get_index_names(next(iter(node_values.values())))
+        index_names = self._get_index_names(
+            next(iter(self._get_col_values(node_values)))
+        )
         named = tuple(name for name in index_names if name is not None)
         if any([name in self.index_names for name in named]):
             raise ValueError(
@@ -188,7 +199,7 @@ class Graph:
                 },
                 value_attr=value_attr,
             )
-            for index in self.yield_index(index_names, shape)
+            for index in self._yield_index(index_names, shape)
         ]
         graph = Graph(nx.compose_all(graphs))
         graph.index_names = self.index_names + named

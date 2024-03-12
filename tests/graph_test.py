@@ -65,7 +65,7 @@ def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
     mapped = graph.map({'a': [1, 2, 3]}).map({'b': [4, 5]})
 
     reduced = mapped.reduce('c', name='sum', axis=0)
-    # Axis 0 should have length 2, so reducing us should leave us with 3 sink nodes,
+    # Axis 0 should have length 2, so reducing it should leave us with 3 sink nodes,
     # i.e., the ones relating to the *first* call to map.
     sink_nodes = [node for node, degree in reduced.graph.out_degree() if degree == 0]
     assert len(sink_nodes) == 3
