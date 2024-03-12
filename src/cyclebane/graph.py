@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Hashable, Iterable, Mapping, Sequence
+from typing import Any, Generator, Hashable, Iterable, Mapping, Sequence
 
 import networkx as nx
 
-IndexName = str | None
+IndexName = Hashable
 IndexValue = Hashable
 
 
@@ -24,9 +24,10 @@ class IndexValues:
     values: tuple[IndexValue]
 
     @staticmethod
-    # TODO fix type hint
-    def from_tuple(t: tuple[IndexName, IndexValue]) -> IndexValues:
-        return IndexValues(axes=t[::2], values=t[1::2])
+    def from_tuple(t: tuple[tuple[IndexName, IndexValue]]) -> IndexValues:
+        names = tuple(name for name, _ in t)
+        values = tuple(value for _, value in t)
+        return IndexValues(axes=names, values=values)
 
     def merge_index(self, other: IndexValues) -> IndexValues:
         return IndexValues(
@@ -166,23 +167,24 @@ class Graph:
         # they want to do that.
         return getattr(values, 'shape', (len(values),))
 
-    def _yield_index(self, indices: list[tuple[Hashable], Iterable[Hashable]]):
+    def _yield_index(
+        self, indices: list[tuple[IndexName, Iterable[IndexValue]]]
+    ) -> Generator[tuple[tuple[IndexName, IndexValue], ...], None, None]:
         """Given a multi-dimensional index, yield all possible combinations."""
         name, index = indices[0]
         for index_value in index:
             if len(indices) == 1:
-                yield (name, index_value)
+                yield ((name, index_value),)
             else:
                 for rest in self._yield_index(indices[1:]):
-                    yield (name, index_value) + rest
+                    yield ((name, index_value),) + rest
 
     def _get_value_at_index(
-        self, values: Sequence[Any], index_values: tuple[str, Hashable]
+        self, values: Sequence[Any], index_values: tuple[tuple[IndexName, IndexValue]]
     ) -> Any:
-        indexers = zip(index_values[::2], index_values[1::2])
         if hasattr(values, 'isel'):
-            return values.isel(dict(indexers))
-        for label, i in indexers:
+            return values.isel(dict(index_values))
+        for label, i in index_values:
             if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
                 values = values[i]
             else:
