@@ -243,9 +243,11 @@ class Graph:
         axis:
             The axis to reduce over. Only one of index and axis can be given.
         name:
-            The name of the new node.
+            The name of the new node(s). If not all axes of the node identified by
+            the key are reduced then this will be the name property of the
+            :py:class:`NodeName` instances used to identify the new nodes.
         attrs:
-            Attributes to set on the new node.
+            Attributes to set on the new node(s).
         """
         attrs = attrs or {}
         if index is not None and axis is not None:
