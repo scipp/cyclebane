@@ -56,7 +56,7 @@ def test_map_over_list() -> None:
     assert x_values == [4, 5]
 
 
-def test_map_does_not_decent_into_nested_lists() -> None:
+def test_map_does_not_descent_into_nested_lists() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
