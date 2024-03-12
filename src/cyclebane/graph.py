@@ -268,7 +268,7 @@ class Graph:
             new_node = (
                 name if len(new_index) == 0 else NodeName(name=name, index=new_index)
             )
-            # We check self.graph, not graph, since previous iteration may have
+            # The elif checks self.graph, not graph, since previous iteration may have
             # inserted the node already. Note that we do need to handle multiple
             # inserts because in general not all axes are reduced, so there are
             # multiple new nodes.
