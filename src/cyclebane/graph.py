@@ -119,6 +119,7 @@ class Index:
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
+        self.index_names: tuple[Hashable] = ()
 
     def get_index_names(self, values) -> tuple[str]:
         if (dims := getattr(values, 'dims', None)) is not None:
@@ -169,6 +170,11 @@ class Graph:
         if len(set(shapes)) != 1:
             raise ValueError('All values must have the same shape')
         index_names = self.get_index_names(next(iter(node_values.values())))
+        named = tuple(name for name in index_names if name is not None)
+        if any([name in self.index_names for name in named]):
+            raise ValueError(
+                f'Conflicting new index names {named} with {self.index_names}'
+            )
         shape = shapes[0]
         successors = find_successors(self.graph, root_nodes=root_nodes)
         graphs = [
@@ -184,7 +190,9 @@ class Graph:
             )
             for index in self.yield_index(index_names, shape)
         ]
-        return Graph(nx.compose_all(graphs))
+        graph = Graph(nx.compose_all(graphs))
+        graph.index_names = self.index_names + named
+        return graph
 
     def reduce(
         self,

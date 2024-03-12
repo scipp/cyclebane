@@ -95,7 +95,7 @@ def test_reduce_scipp_mapped() -> None:
     assert 'sum' in reduced.graph
 
 
-def test_map_with_previously_mapped_index_name_broadcasts() -> None:
+def test_map_with_previously_mapped_index_name_raises() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
     g.add_edge('b', 'c')
@@ -104,44 +104,8 @@ def test_map_with_previously_mapped_index_name_broadcasts() -> None:
     values = sc.arange('x', 3)
 
     mapped = graph.map({'a': values})
-    double_mapped = mapped.map({'b': values})
-    # We now have a 'c' "matrix" with 3x3 elements, with dims are named 'x'
-    assert len(double_mapped.graph.nodes) == 3 + 3 + 3 * 3
-
-
-def test_reduce_repeated_index_reduces_first() -> None:
-    g = nx.DiGraph()
-    g.add_edge('a', 'c')
-    g.add_edge('b', 'c')
-
-    graph = cb.Graph(g)
-    values_x3 = sc.arange('x', 3)
-    values_x2 = sc.arange('x', 2)
-
-    mapped = graph.map({'a': values_x3})
-    double_mapped = mapped.map({'b': values_x2})
-    reduced = double_mapped.reduce('c', name='sum', index='x')
-    assert 'sum' not in reduced.graph
-    sum_nodes = [node for node in reduced.graph.nodes if node.name == 'sum']
-    # The first index that was added is reduced first. Should we reverse the order?
-    assert len(sum_nodes) == 2
-
-
-def test_repeated_index_can_be_reduced_twice() -> None:
-    g = nx.DiGraph()
-    g.add_edge('a', 'c')
-    g.add_edge('b', 'c')
-
-    graph = cb.Graph(g)
-    values_x3 = sc.arange('x', 3)
-    values_x2 = sc.arange('x', 2)
-
-    mapped = graph.map({'a': values_x3})
-    double_mapped = mapped.map({'b': values_x2})
-    # TODO Does this make sense? Should we reduce all? Or require also giving axis?
-    reduced1 = double_mapped.reduce('c', name='sum', index='x')
-    reduced2 = reduced1.reduce('sum', name='sum_again', index='x')
-    assert 'sum_again' in reduced2.graph
+    with pytest.raises(ValueError):
+        mapped.map({'b': values})
 
 
 def test_map_multiple_joint_index() -> None:
