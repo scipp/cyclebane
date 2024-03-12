@@ -10,15 +10,31 @@ import xarray as xr
 import cyclebane as cb
 
 
-def test_map_raises_if_mapping_nonexistent_node() -> None:
+@pytest.mark.parametrize('params', [{}, pd.DataFrame()])
+def test_map_raises_when_mapping_over_empty(params) -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
     with pytest.raises(ValueError):
-        graph.map({'c': [1, 2]})
+        graph.map(params)
+
+
+@pytest.mark.parametrize(
+    'params',
+    [
+        {'c': [1, 2]},
+        {'a': [1, 2], 'c': [1, 2]},
+        pd.DataFrame({'a': [1, 2], 'c': [1, 2]}),
+    ],
+)
+def test_map_raises_if_mapping_nonexistent_node(params) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
     with pytest.raises(ValueError):
-        graph.map({'a': [1, 2], 'c': [1, 2]})
+        graph.map(params)
 
 
 def test_map_raises_if_mapping_non_source_node() -> None:
