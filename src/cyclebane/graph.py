@@ -109,15 +109,6 @@ def rename_successors(
     return relabeled
 
 
-def add_node_attr(
-    graph: nx.DiGraph, node: Hashable, attr: dict[str, Hashable]
-) -> nx.DiGraph:
-    """Add attributes to a node."""
-    graph = graph.copy()
-    graph.nodes[node].update(attr)
-    return graph
-
-
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
