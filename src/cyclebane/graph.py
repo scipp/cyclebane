@@ -119,24 +119,26 @@ class Index:
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
-        self.index_names: tuple[Hashable] = ()
+        self.index_names: set[Hashable] = set()
 
     def _get_index_names(self, values) -> tuple[str]:
         if (dims := getattr(values, 'dims', None)) is not None:
             return dims
+        # 'list' also has 'index', but not 'ndim', so we use 'ndim' to check if it is,
+        # e.g., a pandas.DataFrame.
         if (ndim := getattr(values, 'ndim', None)) is not None:
             if (index := getattr(values, 'index', None)) is not None:
                 # TODO There can be multiple names in Pandas?
                 if index.name is not None:
                     return (index.name,)
         else:
-            ndim = 1  # TODO nested lists?
+            # We do not descend into nested lists, users should use, e.g., NumPy if
+            # they want to do that.
+            ndim = 1
         return (None,) * ndim
 
     def _get_shape(self, values) -> tuple[int]:
-        if (shape := getattr(values, 'shape', None)) is not None:
-            return shape
-        return (len(values),)
+        return getattr(values, 'shape', (len(values),))
 
     def _yield_index(self, index_names: tuple[str], shape: tuple[int]):
         """Given a multi-dimensional index, yield all possible combinations."""
@@ -154,7 +156,7 @@ class Graph:
             if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
                 values = values[i]
             else:
-                # TODO this is Scipp notation? Support also Pandas and Xarray.
+                # TODO This is Scipp notation, support also Xarray properly
                 values = values[(label, i)]
         return values
 
@@ -168,25 +170,27 @@ class Graph:
     def map(
         self,
         node_values: Mapping[Hashable, Sequence[Any]],
+        *,
         value_attr: str = 'value',
     ) -> Graph:
         """For every value, create a new graph with all successors renamed, merge all
         resulting graphs."""
         root_nodes = tuple(node_values.keys())
-        shapes = [
-            self._get_shape(values) for values in self._get_col_values(node_values)
-        ]
+        shapes = [self._get_shape(col) for col in self._get_col_values(node_values)]
         if len(set(shapes)) != 1:
-            raise ValueError('All values must have the same shape')
+            raise ValueError(
+                'All value sequences in a map operation must have the same shape. '
+                'Use multiple map operations if necessary.'
+            )
+        shape = shapes[0]
         index_names = self._get_index_names(
             next(iter(self._get_col_values(node_values)))
         )
         named = tuple(name for name in index_names if name is not None)
         if any([name in self.index_names for name in named]):
             raise ValueError(
-                f'Conflicting new index names {named} with {self.index_names}'
+                f'Conflicting new index names {named} with existing {self.index_names}'
             )
-        shape = shapes[0]
         successors = find_successors(self.graph, root_nodes=root_nodes)
         graphs = [
             rename_successors(
@@ -202,7 +206,7 @@ class Graph:
             for index in self._yield_index(index_names, shape)
         ]
         graph = Graph(nx.compose_all(graphs))
-        graph.index_names = self.index_names + named
+        graph.index_names = self.index_names | set(named)
         return graph
 
     def reduce(

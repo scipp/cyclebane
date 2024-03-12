@@ -56,6 +56,15 @@ def test_map_over_list() -> None:
     assert x_values == [4, 5]
 
 
+def test_map_does_not_decent_into_nested_lists() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [[1, 2], [3, 4]]})
+    assert len(mapped.graph.nodes) == 2 + 2
+
+
 def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
