@@ -255,38 +255,3 @@ class Graph:
             graph.add_edge(node, new_node)
 
         return Graph(graph)
-
-    def groupby(self, key: str, index: str, reduce: str) -> Graph:
-        """
-        Similar to reduce, but group nodes by label.
-
-        Add edges from all nodes (key, index) to new node (func, label), for every
-        label.  The label is given by `labels[index]`.
-        """
-        nodes = [node for node in self.graph.nodes if node[0] == key]
-        orig_index, labels = self.labels[index]
-        sorted_unique_labels = sorted(set(labels))
-        graph = self.graph.copy()
-        for node in nodes:
-            # Node looks like (key, (orig_index, 2), ('y', 11))
-            # We want to add an edge to (reduce, (index, label), ('y', 11))
-            _, *indices = node
-            orig_pos = [i[1] for i in indices if i[0] == orig_index][0]
-            orig_label = labels[orig_pos]
-            indices = [i for i in indices if i[0] != orig_index]
-            label = sorted_unique_labels.index(orig_label)
-            graph.add_edge(node, (reduce, (index, label), *indices))
-        graph = Graph(graph)
-        for name, labels in self.labels.items():
-            if labels[0] != orig_index:
-                graph.labels[name] = labels
-        graph.labels[index] = (index, sorted_unique_labels)
-        return graph
-
-    def _repr_html_(self):
-        from IPython.display import display
-        from networkx.drawing.nx_agraph import to_agraph
-
-        A = to_agraph(self.graph)
-        A.layout('dot')
-        display(A)
