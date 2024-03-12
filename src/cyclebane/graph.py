@@ -173,7 +173,10 @@ def _get_value_at_index(
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
-        self.index_names: set[IndexName] = set()
+
+    @property
+    def index_names(self) -> set[IndexName]:
+        return self.graph.graph.get('index_names', set())
 
     def map(
         self,
@@ -209,9 +212,9 @@ class Graph:
             )
             for index in _yield_index(indices=indices)
         ]
-        graph = Graph(nx.compose_all(graphs))
-        graph.index_names = self.index_names | set(named)
-        return graph
+        graph = nx.compose_all(graphs)
+        graph.graph['index_names'] = self.index_names | set(named)
+        return Graph(graph)
 
     def reduce(
         self,

@@ -281,3 +281,12 @@ def test_reduce_all_axes() -> None:
     # No axis or index given, all axes are reduced, so the new node has no index part.
     assert 'sum' in reduced.graph
     assert reduced.graph.nodes['sum'] == {'func': 'sum'}
+
+
+def test_reduce_preserves_reduced_index_names() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    graph = cb.Graph(g).map({'a': sc.ones(dims=['x', 'y'], shape=(2, 3))})
+    reduced = graph.reduce('b', name='sum')
+    # The new node is reduced, but the graph in its entirety still has the dims.
+    assert reduced.index_names == {'x', 'y'}
