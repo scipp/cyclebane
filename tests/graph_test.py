@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2023 Scipp contributors (https://github.com/scipp)
 import networkx as nx
+import numpy as np
 import pandas as pd
 import pytest
 import scipp as sc
@@ -79,6 +80,15 @@ def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
     # i.e., the ones relating to the *first* call to map.
     sink_nodes = [node for node, degree in reduced.graph.out_degree() if degree == 0]
     assert len(sink_nodes) == 3
+
+
+def test_map_2d_numpy_array() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': np.array([[1, 2, 3], [4, 5, 6]])})
+    assert len(mapped.graph.nodes) == 3 * 2 * 2
 
 
 def test_map_pandas_dataframe() -> None:

@@ -153,19 +153,16 @@ class Graph:
         # TODO Catch cases where different items have different indices?
         values = next(iter(col_values))
         if (dims := getattr(values, 'dims', None)) is not None:
-            if hasattr(values, 'coords'):
-                return [(dim, values.coords[dim]) for dim in dims]
             return [(dim, range(values.sizes[dim])) for dim in dims]
         if _is_pandas_series_or_dataframe(values):
             # TODO There can be multiple names in Pandas?
             return [(values.index.name, values.index)]
         else:
-            # We do not descend into nested lists, users should use, e.g., NumPy if
-            # they want to do that.
-            return [(None, range(shape[0]))]
-        return [(None, range(size)) for size in shape]
+            return [(None, range(size)) for size in shape]
 
     def _get_shape(self, values) -> tuple[int]:
+        # We do not descend into nested lists, users should use, e.g., NumPy if
+        # they want to do that.
         return getattr(values, 'shape', (len(values),))
 
     def _yield_index(self, indices: list[tuple[Hashable], Iterable[Hashable]]):
