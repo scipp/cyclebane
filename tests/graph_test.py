@@ -10,6 +10,17 @@ import xarray as xr
 import cyclebane as cb
 
 
+def test_map_raises_if_mapping_nonexistent_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    with pytest.raises(ValueError):
+        graph.map({'c': [1, 2]})
+    with pytest.raises(ValueError):
+        graph.map({'a': [1, 2], 'c': [1, 2]})
+
+
 def test_map_raises_if_mapping_non_source_node() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
