@@ -109,69 +109,71 @@ def rename_successors(
     return relabeled
 
 
+def _get_indices(
+    node_values: Mapping[Hashable, Sequence[Any]]
+) -> list[tuple[IndexName], Iterable[IndexValue]]:
+    col_values = _get_col_values(node_values)
+    # We do not descend into nested lists, users should use, e.g., NumPy if
+    # they want to do that.
+    shapes = [getattr(col, 'shape', (len(col),)) for col in col_values]
+    if len(set(shapes)) != 1:
+        raise ValueError(
+            'All value sequences in a map operation must have the same shape. '
+            'Use multiple map operations if necessary.'
+        )
+    shape = shapes[0]
+
+    # TODO Catch cases where different items have different indices?
+    values = next(iter(col_values))
+    if (dims := getattr(values, 'dims', None)) is not None:
+        # Note that we are currently not attempting to use Xarray or Scipp coords
+        # as indices.
+        sizes = dict(zip(dims, values.shape))
+        return [(dim, range(sizes[dim])) for dim in dims]
+    if _is_pandas_series_or_dataframe(values):
+        # TODO There can be multiple names in Pandas?
+        return [(values.index.name, values.index)]
+    else:
+        return [(None, range(size)) for size in shape]
+
+
+def _get_col_values(values: Mapping[Hashable, Sequence[Any]]) -> list[Sequence[Any]]:
+    if (columns := getattr(values, 'columns', None)) is not None:
+        return [values.iloc[:, i] for i in range(len(columns))]
+    return list(values.values())
+
+
+def _yield_index(
+    indices: list[tuple[IndexName, Iterable[IndexValue]]]
+) -> Generator[tuple[tuple[IndexName, IndexValue], ...], None, None]:
+    """Given a multi-dimensional index, yield all possible combinations."""
+    name, index = indices[0]
+    for index_value in index:
+        if len(indices) == 1:
+            yield ((name, index_value),)
+        else:
+            for rest in _yield_index(indices[1:]):
+                yield ((name, index_value),) + rest
+
+
+def _get_value_at_index(
+    values: Sequence[Any], index_values: list[tuple[IndexName, IndexValue]]
+) -> Any:
+    if hasattr(values, 'isel'):
+        return values.isel(dict(index_values))
+    for label, i in index_values:
+        if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
+            values = values[i]
+        else:
+            # This is Scipp notation, Xarray uses the 'isel' method.
+            values = values[(label, i)]
+    return values
+
+
 class Graph:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
         self.index_names: set[IndexName] = set()
-
-    def _get_indices(
-        self, node_values: Mapping[Hashable, Sequence[Any]]
-    ) -> list[tuple[IndexName], Iterable[IndexValue]]:
-        col_values = self._get_col_values(node_values)
-        # We do not descend into nested lists, users should use, e.g., NumPy if
-        # they want to do that.
-        shapes = [getattr(col, 'shape', (len(col),)) for col in col_values]
-        if len(set(shapes)) != 1:
-            raise ValueError(
-                'All value sequences in a map operation must have the same shape. '
-                'Use multiple map operations if necessary.'
-            )
-        shape = shapes[0]
-
-        # TODO Catch cases where different items have different indices?
-        values = next(iter(col_values))
-        if (dims := getattr(values, 'dims', None)) is not None:
-            # Note that we are currently not attempting to use Xarray or Scipp coords
-            # as indices.
-            sizes = dict(zip(dims, values.shape))
-            return [(dim, range(sizes[dim])) for dim in dims]
-        if _is_pandas_series_or_dataframe(values):
-            # TODO There can be multiple names in Pandas?
-            return [(values.index.name, values.index)]
-        else:
-            return [(None, range(size)) for size in shape]
-
-    def _yield_index(
-        self, indices: list[tuple[IndexName, Iterable[IndexValue]]]
-    ) -> Generator[tuple[tuple[IndexName, IndexValue], ...], None, None]:
-        """Given a multi-dimensional index, yield all possible combinations."""
-        name, index = indices[0]
-        for index_value in index:
-            if len(indices) == 1:
-                yield ((name, index_value),)
-            else:
-                for rest in self._yield_index(indices[1:]):
-                    yield ((name, index_value),) + rest
-
-    def _get_value_at_index(
-        self, values: Sequence[Any], index_values: list[tuple[IndexName, IndexValue]]
-    ) -> Any:
-        if hasattr(values, 'isel'):
-            return values.isel(dict(index_values))
-        for label, i in index_values:
-            if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
-                values = values[i]
-            else:
-                # This is Scipp notation, Xarray uses the 'isel' method.
-                values = values[(label, i)]
-        return values
-
-    def _get_col_values(
-        self, values: Mapping[Hashable, Sequence[Any]]
-    ) -> list[Sequence[Any]]:
-        if (columns := getattr(values, 'columns', None)) is not None:
-            return [values.iloc[:, i] for i in range(len(columns))]
-        return list(values.values())
 
     def map(
         self,
@@ -187,7 +189,7 @@ class Graph:
         (but not their successors).
         """
         root_nodes = tuple(node_values.keys())
-        indices = self._get_indices(node_values)
+        indices = _get_indices(node_values)
         named = tuple(name for name, _ in indices if name is not None)
         if any([name in self.index_names for name in named]):
             raise ValueError(
@@ -200,12 +202,12 @@ class Graph:
                 successors=successors,
                 index=IndexValues.from_tuple(index),
                 values={
-                    root: self._get_value_at_index(vals, index)
+                    root: _get_value_at_index(vals, index)
                     for root, vals in node_values.items()
                 },
                 value_attr=value_attr,
             )
-            for index in self._yield_index(indices=indices)
+            for index in _yield_index(indices=indices)
         ]
         graph = Graph(nx.compose_all(graphs))
         graph.index_names = self.index_names | set(named)
