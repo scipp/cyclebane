@@ -216,6 +216,44 @@ def test_map_scipp_variable() -> None:
     assert a_values == list(x)
 
 
+def test_map2_scipp_variable() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph2(g)
+    x = sc.array(dims=['x'], values=[1, 2, 3], unit='m')
+    mapped = graph.map({'a': x})
+
+    assert len(mapped.graph.nodes) == 2
+    assert mapped.graph.nodes['a']['indices'] == ('x',)
+    assert mapped.graph.nodes['b']['indices'] == ('x',)
+    assert mapped['b':].index_names == ('x',)
+    assert len(mapped['a':].graph.nodes) == 1
+    assert len(mapped['b':].graph.nodes) == 2
+    assert len(mapped.by_position('x')[1:].indices['x']) == 2
+    assert len(mapped.by_position('x')[1:2].indices['x']) == 1
+    nxgraph = mapped.to_networkx()
+    assert len(nxgraph.nodes) == 2 * 3
+    a_data = [data for node, data in nxgraph.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values == list(x)
+    b_data = [data for node, data in nxgraph.nodes(data=True) if node.name == 'b']
+    assert all('value' not in data for data in b_data)
+
+    assert (
+        len(graph.map({'a': sc.ones(dims=['x', 'y'], shape=(2, 3))}).to_networkx())
+        == 2 * 2 * 3
+    )
+    assert (
+        len(
+            graph.map({'a': sc.ones(dims=['x', 'y'], shape=(2, 3))})
+            .by_position('y')[1:3]
+            .to_networkx()
+        )
+        == 2 * 2 * 2
+    )
+
+
 def test_map_2d_scipp_variable() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')

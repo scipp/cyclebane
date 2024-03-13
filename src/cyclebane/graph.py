@@ -111,7 +111,7 @@ def rename_successors(
 
 def _get_indices(
     node_values: Mapping[Hashable, Sequence[Any]]
-) -> list[tuple[IndexName], Iterable[IndexValue]]:
+) -> list[tuple[IndexName, Iterable[IndexValue]]]:
     col_values = _get_col_values(node_values)
     # We do not descend into nested lists, users should use, e.g., NumPy if
     # they want to do that.
@@ -168,6 +168,117 @@ def _get_value_at_index(
             # This is Scipp notation, Xarray uses the 'isel' method.
             values = values[(label, i)]
     return values
+
+
+class PositionalIndexer:
+    def __init__(self, graph: Graph2, index_name: IndexName):
+        self.graph = graph
+        self.index_name = index_name
+
+    def __getitem__(self, key: int | slice) -> Graph2:
+        if isinstance(key, int):
+            raise ValueError('Only slices are supported')
+        start, stop, step = key.start, key.stop, key.step
+        out = Graph2(self.graph.graph)
+
+        def slice_index(
+            name: IndexName, index: Iterable[IndexValue]
+        ) -> Iterable[IndexValue]:
+            if name != self.index_name:
+                return index
+            return index[start:stop:step]
+
+        out.indices = {
+            name: slice_index(name, index) for name, index in self.graph.indices.items()
+        }
+        return out
+
+
+class Graph2:
+    def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
+        self.graph = graph
+        self.indices: dict[IndexName, Iterable[IndexValue]] = {}
+        self._value_attr = value_attr
+        self._node_values: dict[Hashable, Sequence[Any]] = {}
+
+    @property
+    def value_attr(self) -> str:
+        return self._value_attr
+
+    @property
+    def index_names(self) -> tuple[IndexName]:
+        return tuple(self.indices)
+
+    def map(self, node_values: Mapping[Hashable, Sequence[Any]]) -> Graph2:
+        """
+        Map the graph over the given values by associating source nodes with values.
+
+        All successors of the mapped source nodes are replaced with new nodes, one for
+        each index value. The value is set as an attribute on the new source nodes
+        (but not their successors).
+        """
+        if any(node in self._node_values for node in node_values):
+            raise ValueError('Node already has a value')
+        root_nodes = tuple(node_values.keys())
+        indices = _get_indices(node_values)
+        # TODO make dim_i names for unnamed indices
+        named = tuple(name for name, _ in indices if name is not None)
+        if any([name in self.index_names for name in named]):
+            raise ValueError(
+                f'Conflicting new index names {named} with existing {self.index_names}'
+            )
+        successors = find_successors(self.graph, root_nodes=root_nodes)
+        graph = self.graph.copy()
+        for node in successors:
+            graph.nodes[node]['indices'] = named
+        out = Graph2(graph)
+        out.indices = {name: values for name, values in indices}
+        out._node_values = {**self._node_values, **node_values}
+        return out
+
+    def by_position(self, index_name: IndexName) -> PositionalIndexer:
+        return PositionalIndexer(self, index_name)
+
+    def to_networkx(self) -> nx.DiGraph:
+        graph = self.graph
+        for index_name, index in self.indices.items():
+            # Find all nodes with this index
+            nodes = []
+            for node, data in graph.nodes(data=True):
+                if (node_indices := data.get('indices', None)) is not None:
+                    if index_name in node_indices:
+                        nodes.append(node)
+            # Make a copy for each index value
+            graphs = [
+                rename_successors(
+                    graph,
+                    successors=nodes,
+                    index=IndexValues(axes=(index_name,), values=index),
+                    values={
+                        root: _get_value_at_index(vals, index)
+                        for root, vals in self._node_values.items()
+                        if root in nodes
+                    },
+                    value_attr=self.value_attr,
+                )
+                for index in _yield_index([(index_name, index)])
+            ]
+            graph = nx.compose_all(graphs)
+        return graph
+
+    def __getitem__(self, key: str | slice) -> Any:
+        if isinstance(key, slice):
+            start, stop, step = key.start, key.stop, key.step
+            if stop is not None or step is not None:
+                raise ValueError('Only start is supported')
+            ancestors = nx.ancestors(self.graph, start)
+            ancestors.add(start)
+            out = Graph2(self.graph.subgraph(ancestors))
+            out.indices = self.indices
+            return out
+
+        # TODO not quite correct if we have mapping
+        return self.graph.nodes[key]
 
 
 class Graph:
