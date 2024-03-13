@@ -226,8 +226,9 @@ class Graph:
         each index value. The value is set as an attribute on the new source nodes
         (but not their successors).
         """
-        if any(node in self._node_values for node in node_values):
-            raise ValueError('Node already has a value')
+        for tmp in self._node_values.values():
+            if any(node in tmp for node in node_values):
+                raise ValueError('Node already has a value')
         root_nodes = tuple(node_values.keys())
         ndim = len(self.indices)
         indices = {}

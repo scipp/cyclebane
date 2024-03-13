@@ -105,9 +105,10 @@ def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
     mapped = graph.map({'a': [1, 2, 3]}).map({'b': [4, 5]})
 
     reduced = mapped.reduce('c', name='sum', axis=0)
+    result = reduced.to_networkx()
     # Axis 0 should have length 2, so reducing it should leave us with 3 sink nodes,
     # i.e., the ones relating to the *first* call to map.
-    sink_nodes = [node for node, degree in reduced.graph.out_degree() if degree == 0]
+    sink_nodes = [node for node, degree in result.out_degree() if degree == 0]
     assert len(sink_nodes) == 3
 
 
@@ -302,7 +303,7 @@ def test_map_multiple_joint_index() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2], 'b': [4, 5]})
     # a and b have a common index, so we get 2 c's, not 4.
-    assert len(mapped.graph.nodes) == 2 + 2 + 2
+    assert len(mapped.to_networkx().nodes) == 2 + 2 + 2
 
 
 def test_map_reduce() -> None:
@@ -348,7 +349,7 @@ def test_reduce_preserves_reduced_index_names() -> None:
     graph = cb.Graph(g).map({'a': sc.ones(dims=['x', 'y'], shape=(2, 3))})
     reduced = graph.reduce('b', name='sum')
     # The new node is reduced, but the graph in its entirety still has the dims.
-    assert reduced.index_names == {'x', 'y'}
+    assert reduced.index_names == ('x', 'y')
 
 
 def test_reduce_raises_if_new_node_name_exists() -> None:
