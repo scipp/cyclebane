@@ -262,6 +262,7 @@ def test_map_2d_scipp_variable() -> None:
     graph = cb.Graph(g)
     values = sc.array(dims=['x', 'y'], values=[[1, 2, 3], [4, 5, 6]], unit='m')
     mapped = graph.map({'a': values})
+    assert mapped.index_names == ('x', 'y')
     result = mapped.to_networkx()
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']

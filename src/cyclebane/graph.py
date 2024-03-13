@@ -29,6 +29,9 @@ class IndexValues:
         values = tuple(value for _, value in t)
         return IndexValues(axes=names, values=values)
 
+    def to_tuple(self) -> tuple[tuple[IndexName, IndexValue]]:
+        return tuple(zip(self.axes, self.values))
+
     def merge_index(self, other: IndexValues) -> IndexValues:
         return IndexValues(
             axes=other.axes + self.axes, values=other.values + self.values
@@ -86,12 +89,7 @@ def find_successors(graph: nx.DiGraph, *, root_nodes: tuple[Hashable]) -> set[Ha
 
 
 def rename_successors(
-    graph: nx.DiGraph,
-    *,
-    successors: set[Hashable],
-    index: IndexValues,
-    values: dict[Hashable, Any],
-    value_attr: str = 'value',
+    graph: nx.DiGraph, *, successors: set[Hashable], index: IndexValues
 ) -> nx.DiGraph:
     """Replace 'node' and all its successors with (node, suffix), and update all edges
     accordingly."""
@@ -103,10 +101,7 @@ def rename_successors(
         )
         for node in successors
     }
-    relabeled = nx.relabel_nodes(graph, renamed_nodes, copy=True)
-    for root, value in values.items():
-        relabeled.nodes[renamed_nodes[root]][value_attr] = value
-    return relabeled
+    return nx.relabel_nodes(graph, renamed_nodes, copy=True)
 
 
 def _get_indices(
@@ -226,8 +221,8 @@ class Graph:
         each index value. The value is set as an attribute on the new source nodes
         (but not their successors).
         """
-        for tmp in self._node_values.values():
-            if any(node in tmp for node in node_values):
+        for value_mapping in self._node_values.values():
+            if any(node in value_mapping for node in node_values):
                 raise ValueError('Node already has a value')
         root_nodes = tuple(node_values.keys())
         ndim = len(self.indices)
@@ -317,35 +312,29 @@ class Graph:
 
     def to_networkx(self) -> nx.DiGraph:
         graph = self.graph
-        for index_name, index in self.indices.items():
+        for index_name, index in reversed(self.indices.items()):
             # Find all nodes with this index
             nodes = []
             for node, data in graph.nodes(data=True):
                 if (node_indices := data.get('indices', None)) is not None:
                     if index_name in node_indices:
                         nodes.append(node)
-            values_for_this_index = None
-            for indices, values in self._node_values.items():
-                if index_name in indices:
-                    values_for_this_index = values
-                    break
             # Make a copy for each index value
             graphs = [
                 rename_successors(
-                    graph,
-                    successors=nodes,
-                    index=IndexValues.from_tuple(index),
-                    values={
-                        # TODO This is not correct if values are > 1D
-                        root: _get_value_at_index(vals, index)
-                        for root, vals in values_for_this_index.items()
-                        if root in nodes
-                    },
-                    value_attr=self.value_attr,
+                    graph, successors=nodes, index=IndexValues.from_tuple(index)
                 )
                 for index in _yield_index([(index_name, index)])
             ]
             graph = nx.compose_all(graphs)
+
+        # Get values using previously stored index values
+        for values in self._node_values.values():
+            for name in values:
+                for match in [node for node in graph.nodes if node.name == name]:
+                    value = _get_value_at_index(values[name], match.index.to_tuple())
+                    graph.nodes[match][self.value_attr] = value
+
         return graph
 
     def __getitem__(self, key: str | slice) -> Any:
