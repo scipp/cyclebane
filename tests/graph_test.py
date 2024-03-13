@@ -76,12 +76,13 @@ def test_map_over_list() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
+    result = mapped.to_networkx()
 
-    a_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'a']
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values == [1, 2, 3]
 
-    x_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'x']
+    x_data = [data for node, data in result.nodes(data=True) if node.name == 'x']
     x_values = [data['value'] for data in x_data]
     assert x_values == [4, 5]
 
@@ -92,7 +93,7 @@ def test_map_does_not_descent_into_nested_lists() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [[1, 2], [3, 4]]})
-    assert len(mapped.graph.nodes) == 2 + 2
+    assert len(mapped.to_networkx().nodes) == 2 + 2
 
 
 def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
@@ -116,7 +117,7 @@ def test_map_2d_numpy_array() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': np.array([[1, 2, 3], [4, 5, 6]])})
-    assert len(mapped.graph.nodes) == 3 * 2 * 2
+    assert len(mapped.to_networkx().nodes) == 3 * 2 * 2
 
 
 def test_map_2d_xarray_dataarray() -> None:
@@ -127,7 +128,7 @@ def test_map_2d_xarray_dataarray() -> None:
     da = xr.DataArray(dims=('x', 'y'), data=[[1, 2, 3], [4, 5, 6]])
     print(da, da.dims, da.shape)
     mapped = graph.map({'a': da})
-    assert len(mapped.graph.nodes) == 3 * 2 * 2
+    assert len(mapped.to_networkx().nodes) == 3 * 2 * 2
 
 
 def test_map_pandas_dataframe() -> None:
@@ -138,13 +139,14 @@ def test_map_pandas_dataframe() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map(params)
-    assert len(mapped.graph.nodes) == 3 * 3
+    result = mapped.to_networkx()
+    assert len(result.nodes) == 3 * 3
 
-    a_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'a']
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values == params['a'].to_list()
 
-    b_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'b']
+    b_data = [data for node, data in result.nodes(data=True) if node.name == 'b']
     b_values = [data['value'] for data in b_data]
     assert b_values == params['b'].to_list()
 
@@ -158,7 +160,7 @@ def test_map_pandas_dataframe_uses_index_name() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map(params)
-    assert mapped.index_names == {'abcde'}
+    assert mapped.index_names == ('abcde',)
 
 
 def test_map_pandas_dataframe_uses_index_values() -> None:
@@ -171,7 +173,7 @@ def test_map_pandas_dataframe_uses_index_values() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map(params)
-    for node in mapped.graph.nodes:
+    for node in mapped.to_networkx().nodes:
         assert node.index.axes == ('abcde',)
         assert node.index.values[0] in [11, 22, 33]
 
@@ -188,17 +190,14 @@ def test_map_pandas_dataframe_with_type_as_col_name_works() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map(params)
-    assert len(mapped.graph.nodes) == 3 * 3
+    result = mapped.to_networkx()
+    assert len(result.nodes) == 3 * 3
 
-    int_data = [
-        data for node, data in mapped.graph.nodes(data=True) if node.name == int
-    ]
+    int_data = [data for node, data in result.nodes(data=True) if node.name == int]
     int_values = [data['value'] for data in int_data]
     assert int_values == raw_params[int]
 
-    float_data = [
-        data for node, data in mapped.graph.nodes(data=True) if node.name == float
-    ]
+    float_data = [data for node, data in result.nodes(data=True) if node.name == float]
     float_values = [data['value'] for data in float_data]
     assert float_values == raw_params[float]
 
@@ -210,8 +209,9 @@ def test_map_scipp_variable() -> None:
     graph = cb.Graph(g)
     x = sc.array(dims=['x'], values=[1, 2, 3], unit='m')
     mapped = graph.map({'a': x})
+    result = mapped.to_networkx()
 
-    a_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'a']
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values == list(x)
 
@@ -220,7 +220,7 @@ def test_map2_scipp_variable() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
-    graph = cb.Graph2(g)
+    graph = cb.Graph(g)
     x = sc.array(dims=['x'], values=[1, 2, 3], unit='m')
     mapped = graph.map({'a': x})
 
@@ -261,8 +261,9 @@ def test_map_2d_scipp_variable() -> None:
     graph = cb.Graph(g)
     values = sc.array(dims=['x', 'y'], values=[[1, 2, 3], [4, 5, 6]], unit='m')
     mapped = graph.map({'a': values})
+    result = mapped.to_networkx()
 
-    a_data = [data for node, data in mapped.graph.nodes(data=True) if node.name == 'a']
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values[0:3] == list(values['x', 0])
     assert a_values[3:6] == list(values['x', 1])

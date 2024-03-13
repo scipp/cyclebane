@@ -11,6 +11,6 @@ except importlib.metadata.PackageNotFoundError:
 
 del importlib
 
-from .graph import Graph, Graph2
+from .graph import Graph
 
 __all__ = ["Graph"]

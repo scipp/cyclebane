@@ -162,7 +162,13 @@ def _get_value_at_index(
     if hasattr(values, 'isel'):
         return values.isel(dict(index_values))
     for label, i in index_values:
-        if label is None or (hasattr(values, 'ndim') and values.ndim == 1):
+        # TODO Fix the condition for automatic label detection. We can we ensure we
+        # index the correct axis? Should we just use an integer axis index?
+        if (
+            label is None
+            or label.startswith('dim_')
+            or (hasattr(values, 'ndim') and values.ndim == 1)
+        ):
             values = values[i]
         else:
             # This is Scipp notation, Xarray uses the 'isel' method.
@@ -171,15 +177,15 @@ def _get_value_at_index(
 
 
 class PositionalIndexer:
-    def __init__(self, graph: Graph2, index_name: IndexName):
+    def __init__(self, graph: Graph, index_name: IndexName):
         self.graph = graph
         self.index_name = index_name
 
-    def __getitem__(self, key: int | slice) -> Graph2:
+    def __getitem__(self, key: int | slice) -> Graph:
         if isinstance(key, int):
             raise ValueError('Only slices are supported')
         start, stop, step = key.start, key.stop, key.step
-        out = Graph2(self.graph.graph)
+        out = Graph(self.graph.graph)
 
         def slice_index(
             name: IndexName, index: Iterable[IndexValue]
@@ -194,7 +200,7 @@ class PositionalIndexer:
         return out
 
 
-class Graph2:
+class Graph:
     def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
         self.graph = graph
         self.indices: dict[IndexName, Iterable[IndexValue]] = {}
@@ -209,7 +215,7 @@ class Graph2:
     def index_names(self) -> tuple[IndexName]:
         return tuple(self.indices)
 
-    def map(self, node_values: Mapping[Hashable, Sequence[Any]]) -> Graph2:
+    def map(self, node_values: Mapping[Hashable, Sequence[Any]]) -> Graph:
         """
         Map the graph over the given values by associating source nodes with values.
 
@@ -220,9 +226,14 @@ class Graph2:
         if any(node in self._node_values for node in node_values):
             raise ValueError('Node already has a value')
         root_nodes = tuple(node_values.keys())
-        indices = _get_indices(node_values)
-        # TODO make dim_i names for unnamed indices
-        named = tuple(name for name, _ in indices if name is not None)
+        ndim = len(self.indices)
+        indices = {}
+        for name, values in _get_indices(node_values):
+            if name is None:
+                ndim += 1
+                name = f'dim_{ndim}'
+            indices[name] = values
+        named = tuple(indices)
         if any([name in self.index_names for name in named]):
             raise ValueError(
                 f'Conflicting new index names {named} with existing {self.index_names}'
@@ -231,9 +242,14 @@ class Graph2:
         graph = self.graph.copy()
         for node in successors:
             graph.nodes[node]['indices'] = named
-        out = Graph2(graph)
-        out.indices = {name: values for name, values in indices}
-        out._node_values = {**self._node_values, **node_values}
+        out = Graph(graph)
+        # TODO order?
+        out.indices = {**self.indices, **indices}
+        print(out.indices)
+        out._node_values = {
+            **self._node_values,
+            **dict(zip(root_nodes, _get_col_values(node_values))),
+        }
         return out
 
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
@@ -242,6 +258,7 @@ class Graph2:
     def to_networkx(self) -> nx.DiGraph:
         graph = self.graph
         for index_name, index in self.indices.items():
+            print(index_name, index)
             # Find all nodes with this index
             nodes = []
             for node, data in graph.nodes(data=True):
@@ -253,8 +270,9 @@ class Graph2:
                 rename_successors(
                     graph,
                     successors=nodes,
-                    index=IndexValues(axes=(index_name,), values=index),
+                    index=IndexValues.from_tuple(index),
                     values={
+                        # TODO This is not correct if values are > 1D
                         root: _get_value_at_index(vals, index)
                         for root, vals in self._node_values.items()
                         if root in nodes
@@ -273,7 +291,7 @@ class Graph2:
                 raise ValueError('Only start is supported')
             ancestors = nx.ancestors(self.graph, start)
             ancestors.add(start)
-            out = Graph2(self.graph.subgraph(ancestors))
+            out = Graph(self.graph.subgraph(ancestors))
             out.indices = self.indices
             return out
 
@@ -281,7 +299,7 @@ class Graph2:
         return self.graph.nodes[key]
 
 
-class Graph:
+class GraphOld:
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
 
