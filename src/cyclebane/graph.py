@@ -200,12 +200,15 @@ class PositionalIndexer:
         return out
 
 
+MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
+
+
 class Graph:
     def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
         self.graph = graph
         self.indices: dict[IndexName, Iterable[IndexValue]] = {}
         self._value_attr = value_attr
-        self._node_values: dict[Hashable, Sequence[Any]] = {}
+        self._node_values: dict[tuple[IndexName, ...], MappingToArrayLike] = {}
 
     @property
     def value_attr(self) -> str:
@@ -215,7 +218,7 @@ class Graph:
     def index_names(self) -> tuple[IndexName]:
         return tuple(self.indices)
 
-    def map(self, node_values: Mapping[Hashable, Sequence[Any]]) -> Graph:
+    def map(self, node_values: MappingToArrayLike) -> Graph:
         """
         Map the graph over the given values by associating source nodes with values.
 
@@ -230,8 +233,8 @@ class Graph:
         indices = {}
         for name, values in _get_indices(node_values):
             if name is None:
-                ndim += 1
                 name = f'dim_{ndim}'
+                ndim += 1
             indices[name] = values
         named = tuple(indices)
         if any([name in self.index_names for name in named]):
@@ -241,15 +244,71 @@ class Graph:
         successors = find_successors(self.graph, root_nodes=root_nodes)
         graph = self.graph.copy()
         for node in successors:
-            graph.nodes[node]['indices'] = named
+            graph.nodes[node]['indices'] = named + graph.nodes[node].get('indices', ())
         out = Graph(graph)
         # TODO order?
-        out.indices = {**self.indices, **indices}
-        print(out.indices)
-        out._node_values = {
-            **self._node_values,
-            **dict(zip(root_nodes, _get_col_values(node_values))),
-        }
+        out.indices = {**indices, **self.indices}
+        out._node_values = dict(self._node_values)
+        out._node_values[named] = node_values
+        return out
+
+    def reduce(
+        self,
+        key: str,
+        *,
+        index: None | Hashable = None,
+        axis: None | int = None,
+        name: str,
+        attrs: None | dict[str, Any] = None,
+    ) -> Graph:
+        """
+        Reduce over the given index or axis previously created with :py:meth:`map`.
+        `
+
+        If neither index nor axis is given, all axes are reduced.
+
+        Parameters
+        ----------
+        key:
+            The name of the source node to reduce. This is the original name prior to
+            mapping. Note that there is ambiguity if the same was used as 'name' in
+            a previous reduce operation over a subset of indices/axes.
+        index:
+            The name of the index to reduce over. Only one of index and axis can be
+            given.
+        axis:
+            The axis to reduce over. Only one of index and axis can be given.
+        name:
+            The name of the new node(s). If not all axes of the node identified by
+            the key are reduced then this will be the name property of the
+            :py:class:`NodeName` instances used to identify the new nodes.
+        attrs:
+            Attributes to set on the new node(s).
+        """
+        attrs = attrs or {}
+        if index is not None and axis is not None:
+            raise ValueError('Only one of index and axis can be given')
+        if key not in self.graph:
+            raise KeyError(f"Node '{key}' does not exist in the graph.")
+        indices: tuple[IndexName] = self.graph.nodes[key].get('indices', None)
+        if index is not None:
+            new_index = tuple(value for value in indices if value != index)
+        elif axis is not None:
+            # TODO Should axis refer to axes of graph, or the node?
+            new_index = tuple(value for i, value in enumerate(indices) if i != axis)
+        else:
+            new_index = None
+        indices_attr = {} if new_index is None else {'indices': new_index}
+        if name in self.graph:
+            raise ValueError(f'Node {name} already exists in the graph.')
+
+        graph = self.graph.copy()
+        graph.add_node(name, **attrs, **indices_attr)
+        graph.add_edge(key, name)
+
+        out = Graph(graph)
+        out.indices = self.indices
+        out._node_values = self._node_values
         return out
 
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
@@ -258,13 +317,17 @@ class Graph:
     def to_networkx(self) -> nx.DiGraph:
         graph = self.graph
         for index_name, index in self.indices.items():
-            print(index_name, index)
             # Find all nodes with this index
             nodes = []
             for node, data in graph.nodes(data=True):
                 if (node_indices := data.get('indices', None)) is not None:
                     if index_name in node_indices:
                         nodes.append(node)
+            values_for_this_index = None
+            for indices, values in self._node_values.items():
+                if index_name in indices:
+                    values_for_this_index = values
+                    break
             # Make a copy for each index value
             graphs = [
                 rename_successors(
@@ -274,7 +337,7 @@ class Graph:
                     values={
                         # TODO This is not correct if values are > 1D
                         root: _get_value_at_index(vals, index)
-                        for root, vals in self._node_values.items()
+                        for root, vals in values_for_this_index.items()
                         if root in nodes
                     },
                     value_attr=self.value_attr,

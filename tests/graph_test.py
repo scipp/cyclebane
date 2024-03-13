@@ -315,12 +315,16 @@ def test_map_reduce() -> None:
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
     reduced = mapped.reduce('c', name='func', axis=1)
     # Axis 0 reduces 'x', so there are 2 reduce nodes.
-    assert len(reduced.graph.nodes) == 19
+    assert len(reduced.to_networkx().nodes) == 19
     # Axis 1 reduces 'a', so there are 3 reduce nodes.
     reduced = mapped.reduce('c', name='func', axis=0)
-    assert len(reduced.graph.nodes) == 20
+    assert len(reduced.to_networkx().nodes) == 20
 
-    a_data = [data for node, data in reduced.graph.nodes(data=True) if node.name == 'a']
+    a_data = [
+        data
+        for node, data in reduced.to_networkx().nodes(data=True)
+        if node.name == 'a'
+    ]
     a_values = [data['value'] for data in a_data]
     assert a_values == [1, 2, 3]
 
