@@ -9,7 +9,7 @@ import cyclebane
 sys.path.insert(0, os.path.abspath('.'))
 
 # General information about the project.
-project = u'CycleBane'
+project = u'Cyclebane'
 copyright = u'2024 Scipp contributors'
 author = u'Scipp contributors'
 
@@ -182,7 +182,7 @@ html_sidebars = {
     "**": ["sidebar-nav-bs", "page-toc"],
 }
 
-html_title = "CycleBane"
+html_title = "Cyclebane"
 html_logo = "_static/logo.svg"
 html_favicon = "_static/favicon.ico"
 
