@@ -331,7 +331,11 @@ class Graph:
         # Get values using previously stored index values
         for values in self._node_values.values():
             for name, col in values.items():
-                for match in [node for node in graph.nodes if node.name == name]:
+                for match in [
+                    node
+                    for node in graph.nodes
+                    if isinstance(node, NodeName) and node.name == name
+                ]:
                     value = _get_value_at_index(col, match.index.to_tuple())
                     graph.nodes[match][self.value_attr] = value
 
