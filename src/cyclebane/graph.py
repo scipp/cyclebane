@@ -286,7 +286,12 @@ class Graph:
             raise ValueError('Only one of index and axis can be given')
         if key not in self.graph:
             raise KeyError(f"Node '{key}' does not exist in the graph.")
-        indices: tuple[IndexName] = self.graph.nodes[key].get('indices', None)
+        indices: tuple[IndexName] = self.graph.nodes[key].get('indices', ())
+        if index is not None and index not in indices:
+            raise ValueError(f"Node '{key}' does not have index '{index}'.")
+        # TODO We can support indexing from the back in the future.
+        if axis is not None and (axis < 0 or axis >= len(indices)):
+            raise ValueError(f"Node '{key}' does not have axis '{axis}'.")
         if index is not None:
             new_index = tuple(value for value in indices if value != index)
         elif axis is not None:

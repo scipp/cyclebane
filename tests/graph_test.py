@@ -68,7 +68,33 @@ def test_map_raises_if_shapes_of_values_are_incompatible() -> None:
         graph.map({'a': [1, 2], 'b': [1, 2, 3]})
 
 
-def test_map_over_list() -> None:
+def test_map_over_list_adds_value_attrs_to_source_nodes() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    result = mapped.to_networkx()
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values == [1, 2, 3]
+    b_data = [data for node, data in result.nodes(data=True) if node.name == 'b']
+    assert not any('value' in data for data in b_data)
+
+
+def test_map_does_not_duplicate_unrelated_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('x', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    result = mapped.to_networkx()
+    assert len(result.nodes) == 3 + 3 + 1
+
+
+def test_chained_map_over_list() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
     g.add_edge('b', 'c')
@@ -310,7 +336,7 @@ def test_reduce_preserves_reduced_index_names() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
     graph = cb.Graph(g).map({'a': sc.ones(dims=['x', 'y'], shape=(2, 3))})
-    reduced = graph.reduce('b', name='sum')
+    reduced = graph.reduce('b', name='combine')
     # The new node is reduced, but the graph in its entirety still has the dims.
     assert reduced.index_names == ('x', 'y')
 
@@ -324,3 +350,111 @@ def test_reduce_raises_if_new_node_name_exists() -> None:
     mapped = graph.map({'a': [1, 2, 3]})
     with pytest.raises(ValueError):
         mapped.reduce('c', name='other')
+
+
+@pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
+def test_reduce_raises_if_axis_or_does_not_exist(indexer) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': sc.arange('x', 3)})
+    with pytest.raises(ValueError):
+        mapped.reduce('c', name='combine', **indexer)
+
+
+@pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
+def test_reduce_raises_of_node_does_not_have_the_specified_axis_or_index(
+    indexer,
+) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': sc.arange('x', 3)})
+    with pytest.raises(ValueError):
+        # We mapped 'a' but 'b' is not a descendant of 'a'.
+        mapped.reduce('b', name='combine', **indexer)
+
+
+def test_reduce_works_with_related_unmapped_nodes() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    reduced = mapped.reduce('c', name='combine')
+    result = reduced.to_networkx()
+    assert len(result.nodes) == 3 + 3 + 1 + 1  # 3a + 3b + 1c + 1reduce
+
+
+@pytest.mark.parametrize('indexer', [{'axis': 0}, {'index': 'x'}])
+def test_can_reduce_same_axis_or_index_on_multiple_nodes(indexer) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('a', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': sc.ones(dims=['x'], shape=(3,))})
+    reduced = (
+        mapped.reduce('a', name='reduce-a', **indexer)
+        .reduce('b', name='reduce-b', **indexer)
+        .reduce('c', name='reduce-c', **indexer)
+    )
+    result = reduced.to_networkx()
+    assert len(result.nodes) == 3 + 3 + 3 + 1 + 1 + 1
+
+
+def test_can_reduce_same_node_multiple_times() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': sc.ones(dims=['x'], shape=(3,))})
+    reduced = mapped.reduce('b', name='c1', axis=0).reduce('b', name='c2', axis=0)
+    result = reduced.to_networkx()
+    assert len(result.nodes) == 3 + 3 + 1 + 1
+    c1_parents = [n for n in result.predecessors('c1')]
+    c2_parents = [n for n in result.predecessors('c2')]
+    assert c1_parents == c2_parents
+
+
+def test_can_reduce_different_axes_or_indices_of_same_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': sc.ones(dims=['x', 'y'], shape=(3, 3))})
+    reduced = (
+        mapped.reduce('b', name='c0', axis=0)
+        .reduce('b', name='c1', axis=1)
+        .reduce('b', name='cx', index='x')
+        .reduce('b', name='cy', index='y')
+    )
+    # Helper so we can get all the parents of the reduce nodes.
+    helper = (
+        reduced.reduce('c0', name='d0', axis=0)
+        .reduce('c1', name='d1', axis=0)
+        .reduce('cx', name='dx', index='y')
+        .reduce('cy', name='dy', index='x')
+    ).to_networkx()
+    reduced = reduced.to_networkx()
+
+    assert len(reduced.nodes) == 9 + 9 + 4 * 3
+    c0s = [n for n in helper.predecessors('d0')]
+    c1s = [n for n in helper.predecessors('d1')]
+    cxs = [n for n in helper.predecessors('dx')]
+    cys = [n for n in helper.predecessors('dy')]
+
+    for c0, cx in zip(c0s, cxs):
+        c0_parents = [n for n in reduced.predecessors(c0)]
+        cx_parents = [n for n in reduced.predecessors(cx)]
+        assert c0_parents == cx_parents
+
+    for c1, cy in zip(c1s, cys):
+        c1_parents = [n for n in reduced.predecessors(c1)]
+        cy_parents = [n for n in reduced.predecessors(cy)]
+        assert c1_parents == cy_parents
