@@ -458,3 +458,20 @@ def test_can_reduce_different_axes_or_indices_of_same_node() -> None:
         c1_parents = [n for n in reduced.predecessors(c1)]
         cy_parents = [n for n in reduced.predecessors(cy)]
         assert c1_parents == cy_parents
+
+
+def test_axis_in_reduce_refers_to_node_axis_not_graph_axis() -> None:
+    # TODO Is this actually the behavior we want?
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    graph = graph.map({'a': sc.ones(dims=['x', 'y', 'z'], shape=(2, 2, 2))})
+    graph = graph.reduce('b', name='c', index='x')
+
+    # Axis 1 of the graph is 'y', but we are reducing at 'c' which is (y, z)
+    # so axis 1 of the reduce is 'z'.
+    result = graph.reduce('c', name='d', axis=1).to_networkx()
+    d_nodes = [n for n in result.nodes if n.name == 'd']
+    # 'y' is left, even though axis 1 of the graph is 'y'.
+    assert all(n.index.axes == ('y',) for n in d_nodes)
