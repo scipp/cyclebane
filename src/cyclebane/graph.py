@@ -372,24 +372,53 @@ class Graph:
         # way compatible with dims/indices of the graphs?
         if isinstance(value, Graph):
             value = value.to_networkx()
-        # TODO Should we check if there are conflicting nodes?
         sink_nodes = [node for node in value.nodes if value.out_degree(node) == 0]
         if len(sink_nodes) != 1:
             raise ValueError('Value must have exactly one sink node')
         sink = sink_nodes[0]
         sink_data = value.nodes[sink]
-        ancestors = nx.ancestors(self.graph, key)
-        if (
-            {node for ancestor in ancestors for node in self.graph.successors(ancestor)}
-            - {key}
-            - ancestors
-        ):
-            raise ValueError('Cannot replace node with children')
-        self.graph.remove_nodes_from(ancestors)
-        self.graph.add_node(key, **sink_data)
+        graph = self.graph.copy()
+        self._remove_predecessors_with_single_successor(graph, key)
+        # ancestors = nx.ancestors(graph, key)
+        # graph.remove_nodes_from(ancestors)
+        # graph.remove_edges_from(list(graph.in_edges(key)))
+        graph.add_node(key, **sink_data)
         ancestor_graph = value.copy()
         ancestor_graph.remove_node(sink)
-        self.graph = nx.compose(self.graph, ancestor_graph)
+
+        # TODO Checks seem complicated, maybe we should just make it the user's
+        # responsibility to ensure the graphs are compatible?
+        self._check_for_conflicts(graph, ancestor_graph)
+
+        graph = nx.compose(graph, ancestor_graph)
         for parent in value.predecessors(sink):
             edge_data = value.get_edge_data(parent, sink)
-            self.graph.add_edge(parent, key, **edge_data)
+            graph.add_edge(parent, key, **edge_data)
+        # Delay setting graph until we know no step fails
+        self.graph = graph
+
+    def _remove_predecessors_with_single_successor(
+        self, graph: nx.DiGraph, node: Hashable
+    ) -> None:
+        """Remove each predecessors of node that has node as its only successor."""
+        for pred in list(graph.predecessors(node)):
+            if len(list(graph.successors(pred))) == 1:
+                self._remove_predecessors_with_single_successor(graph, pred)
+                graph.remove_node(pred)
+
+    def _check_for_conflicts(self, graph: nx.DiGraph, ancestor_graph):
+        for node in ancestor_graph.nodes:
+            if node in graph:
+                if graph.nodes[node] != ancestor_graph.nodes[node]:
+                    raise ValueError(
+                        f"Node '{node}' has different attributes in ancestor_graph"
+                    )
+                if list(graph.in_edges(node)) != list(ancestor_graph.in_edges(node)):
+                    raise ValueError(
+                        f"Node '{node}' has different incoming edges in ancestor_graph"
+                    )
+                # TODO The composite graph may add more edges, so this check is bad
+                if list(graph.out_edges(node)) != list(ancestor_graph.out_edges(node)):
+                    raise ValueError(
+                        f"Node '{node}' has different outgoing edges in ancestor_graph"
+                    )
