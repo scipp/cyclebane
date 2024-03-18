@@ -359,3 +359,37 @@ class Graph:
 
         # TODO not quite correct if we have mapping
         return self.graph.nodes[key]
+
+    def __setitem__(self, key: int | slice, value: nx.Digraph) -> None:
+        """
+        Set the value of the index.
+
+        Keeps the node and its attributes, but replaces the children with the children
+        of the given value. The value must have a unique sink node. In other words,
+        the subtree at key is replaced with the subtree at the sink node of value.
+        """
+        # TODO Do we actually want to do this conversion, or implement merging in a
+        # way compatible with dims/indices of the graphs?
+        if isinstance(value, Graph):
+            value = value.to_networkx()
+        # TODO Should we check if there are conflicting nodes?
+        sink_nodes = [node for node in value.nodes if value.out_degree(node) == 0]
+        if len(sink_nodes) != 1:
+            raise ValueError('Value must have exactly one sink node')
+        sink = sink_nodes[0]
+        sink_data = value.nodes[sink]
+        ancestors = nx.ancestors(self.graph, key)
+        if (
+            {node for ancestor in ancestors for node in self.graph.successors(ancestor)}
+            - {key}
+            - ancestors
+        ):
+            raise ValueError('Cannot replace node with children')
+        self.graph.remove_nodes_from(ancestors)
+        self.graph.add_node(key, **sink_data)
+        ancestor_graph = value.copy()
+        ancestor_graph.remove_node(sink)
+        self.graph = nx.compose(self.graph, ancestor_graph)
+        for parent in value.predecessors(sink):
+            edge_data = value.get_edge_data(parent, sink)
+            self.graph.add_edge(parent, key, **edge_data)
