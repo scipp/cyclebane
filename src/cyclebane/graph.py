@@ -378,9 +378,9 @@ class Graph:
         sink = sink_nodes[0]
         sink_data = value.nodes[sink]
         graph = self.graph.copy()
-        self._remove_predecessors_with_single_successor(graph, key)
         # ancestors = nx.ancestors(graph, key)
         # graph.remove_nodes_from(ancestors)
+        self._remove_ancestors(graph, key)
         # graph.remove_edges_from(list(graph.in_edges(key)))
         graph.add_node(key, **sink_data)
         ancestor_graph = value.copy()
@@ -388,7 +388,7 @@ class Graph:
 
         # TODO Checks seem complicated, maybe we should just make it the user's
         # responsibility to ensure the graphs are compatible?
-        self._check_for_conflicts(graph, ancestor_graph)
+        # self._check_for_conflicts(graph, ancestor_graph)
 
         graph = nx.compose(graph, ancestor_graph)
         for parent in value.predecessors(sink):
@@ -397,14 +397,17 @@ class Graph:
         # Delay setting graph until we know no step fails
         self.graph = graph
 
-    def _remove_predecessors_with_single_successor(
-        self, graph: nx.DiGraph, node: Hashable
-    ) -> None:
-        """Remove each predecessors of node that has node as its only successor."""
-        for pred in list(graph.predecessors(node)):
-            if len(list(graph.successors(pred))) == 1:
-                self._remove_predecessors_with_single_successor(graph, pred)
-                graph.remove_node(pred)
+    def _remove_ancestors(self, graph: nx.DiGraph, node: Hashable) -> None:
+        ancestors = nx.ancestors(graph, node)
+        ancestors_successors = {
+            ancestor: graph.successors(ancestor) for ancestor in ancestors
+        }
+        to_remove = []
+        for ancestor, successors in ancestors_successors.items():
+            # If any successor does not have node as descendant we must keep the node
+            if all(nx.has_path(graph, successor, node) for successor in successors):
+                to_remove.append(ancestor)
+        graph.remove_nodes_from(to_remove)
 
     def _check_for_conflicts(self, graph: nx.DiGraph, ancestor_graph):
         for node in ancestor_graph.nodes:
