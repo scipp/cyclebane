@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Generator, Hashable, Iterable, Mapping, Sequence
+from uuid import uuid4
 
 import networkx as nx
 
@@ -16,6 +17,20 @@ def _is_pandas_series_or_dataframe(obj: Any) -> bool:
         "<class 'pandas.core.frame.DataFrame'>",
         "<class 'pandas.core.series.Series'>",
     ]
+
+
+def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
+    sink_nodes = [node for node in graph.nodes if graph.out_degree(node) == 0]
+    if len(sink_nodes) != 1:
+        raise ValueError('Graph must have exactly one sink node')
+    return sink_nodes[0]
+
+
+def _get_new_node_name(graph: nx.DiGraph) -> str:
+    while True:
+        name = str(uuid4())
+        if name not in graph:
+            return name
 
 
 @dataclass(frozen=True)
@@ -250,16 +265,15 @@ class Graph:
 
     def reduce(
         self,
-        key: str,
+        key: None | str = None,
         *,
         index: None | Hashable = None,
         axis: None | int = None,
-        name: str,
+        name: None | str = None,
         attrs: None | dict[str, Any] = None,
     ) -> Graph:
         """
         Reduce over the given index or axis previously created with :py:meth:`map`.
-        `
 
         If neither index nor axis is given, all axes are reduced.
 
@@ -267,20 +281,20 @@ class Graph:
         ----------
         key:
             The name of the source node to reduce. This is the original name prior to
-            mapping. Note that there is ambiguity if the same was used as 'name' in
-            a previous reduce operation over a subset of indices/axes.
+            mapping. If not given, tries to find a unique sink node.
         index:
             The name of the index to reduce over. Only one of index and axis can be
             given.
         axis:
             The axis to reduce over. Only one of index and axis can be given.
         name:
-            The name of the new node(s). If not all axes of the node identified by
-            the key are reduced then this will be the name property of the
-            :py:class:`NodeName` instances used to identify the new nodes.
+            The name of the new node. If not given, a unique name is generated.
         attrs:
             Attributes to set on the new node(s).
         """
+        key = key or _get_unique_sink(self.graph)
+        name = name or _get_new_node_name(self.graph)
+
         attrs = attrs or {}
         if index is not None and axis is not None:
             raise ValueError('Only one of index and axis can be given')
