@@ -355,6 +355,7 @@ class Graph:
             ancestors.add(start)
             out = Graph(self.graph.subgraph(ancestors))
             out.indices = self.indices
+            out._node_values = self._node_values
             return out
 
         # TODO not quite correct if we have mapping
