@@ -378,10 +378,7 @@ class Graph:
         sink = sink_nodes[0]
         sink_data = value.nodes[sink]
         graph = self.graph.copy()
-        # ancestors = nx.ancestors(graph, key)
-        # graph.remove_nodes_from(ancestors)
         self._remove_ancestors(graph, key)
-        # graph.remove_edges_from(list(graph.in_edges(key)))
         graph.add_node(key, **sink_data)
         ancestor_graph = value.copy()
         ancestor_graph.remove_node(sink)
@@ -408,6 +405,7 @@ class Graph:
             if all(nx.has_path(graph, successor, node) for successor in successors):
                 to_remove.append(ancestor)
         graph.remove_nodes_from(to_remove)
+        graph.remove_edges_from(list(graph.in_edges(node)))
 
     def _check_for_conflicts(self, graph: nx.DiGraph, ancestor_graph):
         for node in ancestor_graph.nodes:
