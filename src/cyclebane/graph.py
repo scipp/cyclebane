@@ -336,7 +336,7 @@ class Graph:
         graph.add_edge(key, name)
 
         out = Graph(graph)
-        out.indices = self.indices
+        out.indices = dict(self.indices)
         out._node_values = dict(self._node_values)
         return out
 
@@ -374,22 +374,23 @@ class Graph:
 
         return graph
 
-    def __getitem__(self, key: str | slice) -> Any:
+    def __getitem__(self, key: Hashable | slice) -> Graph:
+        """
+        Get the branch of the graph rooted at the given node.
+
+        The branch is a subgraph containing the given node and all its ancestors.
+        Think of this like a Git branch, where the given node is the head of the branch.
+        """
         if isinstance(key, slice):
-            start, stop, step = key.start, key.stop, key.step
-            if stop is not None or step is not None:
-                raise ValueError('Only start is supported')
-            ancestors = nx.ancestors(self.graph, start)
-            ancestors.add(start)
-            out = Graph(self.graph.subgraph(ancestors))
-            out.indices = self.indices
-            out._node_values = dict(self._node_values)
-            return out
+            raise NotImplementedError('Only single nodes are supported ')
+        ancestors = nx.ancestors(self.graph, key)
+        ancestors.add(key)
+        out = Graph(self.graph.subgraph(ancestors))
+        out.indices = dict(self.indices)
+        out._node_values = dict(self._node_values)
+        return out
 
-        # TODO not quite correct if we have mapping
-        return self.graph.nodes[key]
-
-    def __setitem__(self, key: int | slice, value: nx.Digraph) -> None:
+    def __setitem__(self, key: Hashable | slice, value: nx.Digraph) -> None:
         """
         Set the value of the index.
 
