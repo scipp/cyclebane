@@ -475,3 +475,12 @@ def test_axis_in_reduce_refers_to_node_axis_not_graph_axis() -> None:
     d_nodes = [n for n in result.nodes if n.name == 'd']
     # 'y' is left, even though axis 1 of the graph is 'y'.
     assert all(n.index.axes == ('y',) for n in d_nodes)
+
+
+def test_setitem_raises_TypeError_if_given_networkx_graph() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    with pytest.raises(TypeError):
+        graph['a'] = nx.DiGraph()
