@@ -204,8 +204,22 @@ class PositionalIndexer:
                 return index
             return index[start:stop:step]
 
+        def slice_values(
+            index_names: tuple[IndexName, ...], values: MappingToArrayLike
+        ) -> MappingToArrayLike:
+            if self.index_name not in index_names:
+                return values
+            return {
+                name: col[start:stop:step] if name == self.index_name else col
+                for name, col in values.items()
+            }
+
         out.indices = {
             name: slice_index(name, index) for name, index in self.graph.indices.items()
+        }
+        out._node_values = {
+            index_names: slice_values(index_names, values)
+            for index_names, values in self.graph._node_values.items()
         }
         return out
 
@@ -323,7 +337,7 @@ class Graph:
 
         out = Graph(graph)
         out.indices = self.indices
-        out._node_values = self._node_values
+        out._node_values = dict(self._node_values)
         return out
 
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
@@ -369,7 +383,7 @@ class Graph:
             ancestors.add(start)
             out = Graph(self.graph.subgraph(ancestors))
             out.indices = self.indices
-            out._node_values = self._node_values
+            out._node_values = dict(self._node_values)
             return out
 
         # TODO not quite correct if we have mapping
@@ -384,7 +398,8 @@ class Graph:
         the subtree at key is replaced with the subtree at the sink node of value.
         """
         # TODO Do we actually want to do this conversion, or implement merging in a
-        # way compatible with dims/indices of the graphs?
+        # way compatible with dims/indices of the graphs? It seems we need to, since
+        # otherwise we run into node-name-conflicts after map-reduce on a branch.
         if isinstance(value, Graph):
             value = value.to_networkx()
         sink_nodes = [node for node in value.nodes if value.out_degree(node) == 0]
