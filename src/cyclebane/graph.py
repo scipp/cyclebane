@@ -123,7 +123,9 @@ class NodeName:
         return f'{self.name}({self.index})'
 
 
-def find_successors(graph: nx.DiGraph, *, root_nodes: tuple[Hashable]) -> set[Hashable]:
+def _find_successors(
+    graph: nx.DiGraph, *, root_nodes: tuple[Hashable]
+) -> set[Hashable]:
     successors = set()
     for root in root_nodes:
         if root not in graph:
@@ -138,7 +140,7 @@ def find_successors(graph: nx.DiGraph, *, root_nodes: tuple[Hashable]) -> set[Ha
     return successors
 
 
-def rename_successors(
+def _rename_successors(
     graph: nx.DiGraph, *, successors: set[Hashable], index: IndexValues
 ) -> nx.DiGraph:
     """Replace 'node' and all its successors with (node, suffix), and update all edges
@@ -301,7 +303,7 @@ class Graph:
             raise ValueError(
                 f'Conflicting new index names {named} with existing {self.index_names}'
             )
-        successors = find_successors(self.graph, root_nodes=root_nodes)
+        successors = _find_successors(self.graph, root_nodes=root_nodes)
         graph = self.graph.copy()
         for node in successors:
             graph.nodes[node]['indices'] = named + graph.nodes[node].get('indices', ())
@@ -389,7 +391,7 @@ class Graph:
                         nodes.append(node)
             # Make a copy for each index value
             graphs = [
-                rename_successors(
+                _rename_successors(
                     graph, successors=nodes, index=IndexValues.from_tuple(index)
                 )
                 for index in _yield_index([(index_name, index)])
@@ -421,6 +423,7 @@ class Graph:
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
         out = Graph(self.graph.subgraph(ancestors))
+        # TODO Only keep indices and values for nodes in the subgraph
         out.indices = dict(self.indices)
         out._node_values = dict(self._node_values)
         return out
