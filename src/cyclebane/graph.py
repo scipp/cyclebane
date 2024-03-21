@@ -283,6 +283,12 @@ class Graph:
       Scipp). Basically, we would like to use the slicing methods of the underlying
       object. This may not be trivial, since we might mix different types of array-like
       objects at nodes with multiple predecessors.
+    - We could avoid the `indices` attribute on nodes (added by `map`). Instead, lookup
+      the ancestors and identify mapped source nodes. This will simplify slicing, as
+      it avoids the need to remove indices on nodes (we only slice the values arrays).
+      `reduce` would need to add an attribute on which dim to reduce though, so this
+      may not actually be easier. It might solve the problem of selecting branches
+      though, which also needs to select a subset of the mapped arrays.
     """
 
     def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
