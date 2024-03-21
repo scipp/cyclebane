@@ -265,6 +265,26 @@ MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
 
 
 class Graph:
+    """
+    A Cyclebane graph is a directed acyclic graph with additional array-like structure.
+
+    The array-like structure selectively affects nodes in the graph by associating
+    source nodes with an array-like object. The source node and all its descendants
+    thus gain an additional index or dimension.
+
+    Notes
+    -----
+    The current implementation is a proof of concept, there is a number of things to
+    improve:
+    - I think I want to avoid spelling out the indices early in `map`, but instead delay
+      this until `to_networkx`.
+    - Overall, I would like to reduce the array-handling code and transparently forward
+      to the slicing code of the underlying array-like object (Pandas, NumPy, Xarray,
+      Scipp). Basically, we would like to use the slicing methods of the underlying
+      object. This may not be trivial, since we might mix different types of array-like
+      objects at nodes with multiple predecessors.
+    """
+
     def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
         self.graph = graph
         self.indices: dict[IndexName, Iterable[IndexValue]] = {}
