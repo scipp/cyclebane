@@ -484,3 +484,24 @@ def test_setitem_raises_TypeError_if_given_networkx_graph() -> None:
     graph = cb.Graph(g)
     with pytest.raises(TypeError):
         graph['a'] = nx.DiGraph()
+
+
+def test_setitem_with_other_graph_keeps_nodename_of_key_but_replaces_node_data() -> (
+    None
+):
+    g1 = nx.DiGraph()
+    g1.add_edge('b', 'a')
+    g1.nodes['b']['attr'] = 1
+    g2 = nx.DiGraph()
+    g2.add_edge('d', 'c')
+    g2.nodes['c']['attr'] = 2
+
+    graph = cb.Graph(g1)
+    graph['b'] = cb.Graph(g2)
+    assert 'b' in graph.to_networkx()
+    nx_graph = graph.to_networkx()
+    assert set(nx_graph.nodes) == {'a', 'b', 'd'}
+    assert len(nx_graph.edges) == 2
+    assert nx_graph.has_edge('d', 'b')
+    assert nx_graph.has_edge('b', 'a')
+    assert nx_graph.nodes['b'] == {'attr': 2}

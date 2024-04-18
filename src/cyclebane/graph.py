@@ -33,7 +33,7 @@ def _get_new_node_name(graph: nx.DiGraph) -> str:
             return name
 
 
-def _remove_with_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
+def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
     graph = graph.copy()
     ancestors = nx.ancestors(graph, node)
     ancestors_successors = {
@@ -46,7 +46,6 @@ def _remove_with_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
             to_remove.append(ancestor)
     graph.remove_nodes_from(to_remove)
     graph.remove_edges_from(list(graph.in_edges(node)))
-    graph.remove_node(node)
     return graph
 
 
@@ -297,6 +296,12 @@ class Graph:
         self._value_attr = value_attr
         self._node_values: dict[tuple[IndexName, ...], MappingToArrayLike] = {}
 
+    def copy(self) -> Graph:
+        graph = Graph(self.graph.copy(), value_attr=self._value_attr)
+        graph.indices = dict(self.indices)
+        graph._node_values = dict(self._node_values)
+        return graph
+
     @property
     def value_attr(self) -> str:
         return self._value_attr
@@ -467,16 +472,15 @@ class Graph:
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
-        graph = _remove_with_ancestors(self.graph, branch)
+        new_branch = nx.relabel_nodes(new_branch, {sink: branch})
+        graph = _remove_ancestors(self.graph, branch)
 
         # TODO Checks seem complicated, maybe we should just make it the user's
         # responsibility to ensure the graphs are compatible?
         # _check_for_conflicts(graph, ancestor_graph)
 
         graph = nx.compose(graph, new_branch)
-        for child in self.graph.successors(branch):
-            edge_data = self.graph.get_edge_data(branch, child)
-            graph.add_edge(sink, child, **edge_data)
+
         # Delay setting graph until we know no step fails
         self.graph = graph
         self.indices.update(other.indices)
