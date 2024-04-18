@@ -303,11 +303,11 @@ def test_map_reduce() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
-    reduced = mapped.reduce('c', name='func', axis=1)
+    reduced = mapped.reduce(name='func', axis=1)
     # Axis 0 reduces 'x', so there are 2 reduce nodes.
     assert len(reduced.to_networkx().nodes) == 19
     # Axis 1 reduces 'a', so there are 3 reduce nodes.
-    reduced = mapped.reduce('c', name='func', axis=0)
+    reduced = mapped.reduce(name='func', axis=0)
     assert len(reduced.to_networkx().nodes) == 20
 
     a_data = [
@@ -326,7 +326,7 @@ def test_reduce_all_axes() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'b': [4, 5]})
-    reduced = mapped.reduce('c', name='sum', attrs={'func': 'sum'})
+    reduced = mapped.reduce(name='sum', attrs={'func': 'sum'})
     # No axis or index given, all axes are reduced, so the new node has no index part.
     assert 'sum' in reduced.graph
     assert reduced.graph.nodes['sum'] == {'func': 'sum'}
@@ -349,7 +349,7 @@ def test_reduce_raises_if_new_node_name_exists() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
     with pytest.raises(ValueError):
-        mapped.reduce('c', name='other')
+        mapped.reduce(name='other')
 
 
 @pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
@@ -361,7 +361,7 @@ def test_reduce_raises_if_axis_or_does_not_exist(indexer) -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': sc.arange('x', 3)})
     with pytest.raises(ValueError):
-        mapped.reduce('c', name='combine', **indexer)
+        mapped.reduce(name='combine', **indexer)
 
 
 @pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
