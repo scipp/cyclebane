@@ -518,12 +518,23 @@ class Graph:
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
-        graph = _remove_ancestors(self.graph, branch)
-        graph.nodes[branch].clear()
+        if branch in self.graph:
+            graph = _remove_ancestors(self.graph, branch)
+            graph.nodes[branch].clear()
+        else:
+            graph = self.graph
 
-        # TODO Checks seem complicated, maybe we should just make it the user's
-        # responsibility to ensure the graphs are compatible?
-        # _check_for_conflicts(graph, ancestor_graph)
+        intersection_nodes = set(graph.nodes) & set(new_branch.nodes) - {branch}
+
+        for node in intersection_nodes:
+            if graph.pred[node] != new_branch.pred[node]:
+                raise ValueError(
+                    f"Node inputs differ for '{node}':\n"
+                    f"  {graph.pred[node]}\n"
+                    f"  {new_branch.pred[node]}\n"
+                )
+            if graph.nodes[node] != new_branch.nodes[node]:
+                raise ValueError(f"Node data differs for node '{node}'")
 
         graph = nx.compose(graph, new_branch)
 
