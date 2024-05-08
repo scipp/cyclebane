@@ -371,6 +371,11 @@ class Graph:
         # TODO order?
         out.indices = {**indices, **self.indices}
         out._node_values = dict(self._node_values)
+        # TODO When removing nodes, e.g., via __getitem__, we should remove also the
+        # node values. We need to make a shallow copy though, or extract columns and
+        # store them individually. As we basically want do to indexing ops on the node
+        # values we should consider using a dedicated class NodeValues to encapsulate
+        # this complexity.
         out._node_values[named] = node_values
         return out
 
@@ -508,8 +513,15 @@ class Graph:
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
         out = Graph(self.graph.subgraph(ancestors))
-        # TODO Only keep indices and values for nodes in the subgraph
-        out.indices = dict(self.indices)
+        if isinstance(key, MappedNode):
+            out.indices = {
+                name: index
+                for name, index in self.indices.items()
+                if name in key.indices
+            }
+        else:
+            out.indices = {}
+        # TODO Only keep node values for nodes in the subgraph
         out._node_values = dict(self._node_values)
         return out
 

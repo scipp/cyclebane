@@ -542,3 +542,15 @@ def test_setitem_raises_on_conflicting_input_nodes_in_ancestor() -> None:
     graph = cb.Graph(g1)
     with pytest.raises(ValueError, match="Node inputs differ for node 'b'"):
         graph['x'] = cb.Graph(g2)
+
+
+def test_getitem_keeps_only_relevant_indices() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    assert mapped['a'].indices == {'dim_0': range(3)}
+    assert mapped['b'].indices == {}  # Not mapped
+    assert mapped['c'].indices == {'dim_0': range(3)}
