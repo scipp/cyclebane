@@ -28,13 +28,20 @@ def test_map_raises_when_mapping_over_empty(params) -> None:
         pd.DataFrame({'a': [1, 2], 'c': [1, 2]}),
     ],
 )
-def test_map_raises_if_mapping_nonexistent_node(params) -> None:
+def test_map_adds_node_when_mapping_nonexistent_node(params) -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
-        graph.map(params)
+    mapped = graph.map(params)
+    result = mapped.to_networkx()
+    c_data = [
+        data
+        for node, data in result.nodes(data=True)
+        if getattr(node, 'name', None) == 'c'
+    ]
+    c_values = [data['value'] for data in c_data]
+    assert c_values == [1, 2]
 
 
 def test_map_raises_if_mapping_non_source_node() -> None:

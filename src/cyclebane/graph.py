@@ -275,8 +275,6 @@ class Graph:
     -----
     The current implementation is a proof of concept, there is a number of things to
     improve:
-    - I think I want to avoid spelling out the indices early in `map`, but instead delay
-      this until `to_networkx`.
     - Overall, I would like to reduce the array-handling code and transparently forward
       to the slicing code of the underlying array-like object (Pandas, NumPy, Xarray,
       Scipp). Basically, we would like to use the slicing methods of the underlying
@@ -317,6 +315,14 @@ class Graph:
         All successors of the mapped source nodes are replaced with new nodes, one for
         each index value. The value is set as an attribute on the new source nodes
         (but not their successors).
+
+        Parameters
+        ----------
+        node_values:
+            A mapping from source node names to array-like objects. The source nodes
+            are the roots of the branches to be mapped. The array-like objects must
+            support slicing, e.g., NumPy arrays, Xarray DataArrays, Pandas DataFrames,
+            etc.
         """
         for value_mapping in self._node_values.values():
             if any(node in value_mapping for node in node_values):
@@ -334,11 +340,19 @@ class Graph:
             raise ValueError(
                 f'Conflicting new index names {named} with existing {self.index_names}'
             )
-        successors = _find_successors(self.graph, root_nodes=root_nodes)
+
+        # Make sure root nodes exist in graph, add them if not. This choice allows for
+        # mapping, e.g., with multiple columns from a DataFrame, representing labels
+        # used later for groupby operations.
+        root_node_graph = nx.DiGraph()
+        root_node_graph.add_nodes_from(root_nodes)
+        graph = nx.compose(self.graph, root_node_graph)
+
+        successors = _find_successors(graph, root_nodes=root_nodes)
         name_mapping: dict[Hashable, MappedNode] = {}
         for node in successors:
             name_mapping[node] = node_with_indices(node, named)
-        graph = nx.relabel_nodes(self.graph, name_mapping)
+        graph = nx.relabel_nodes(graph, name_mapping)
 
         out = Graph(graph)
         # TODO order?
