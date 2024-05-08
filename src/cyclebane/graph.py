@@ -51,6 +51,12 @@ def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
 
 @dataclass(frozen=True)
 class IndexValues:
+    """
+    Index values used as part of :py:class:`NodeName`.
+
+    Conceptually, this is a mapping from index names to index values.
+    """
+
     axes: tuple[IndexName]
     values: tuple[IndexValue]
 
@@ -94,6 +100,8 @@ class IndexValues:
 
 @dataclass(frozen=True)
 class NodeName:
+    """Node name with indices used for mapped nodes when converting to NetworkX."""
+
     name: Hashable
     index: IndexValues
 
@@ -106,6 +114,10 @@ class NodeName:
 
 @dataclass(frozen=True)
 class MappedNode:
+    """
+    Key for a node in :py:class:`Graph` representing a collection of "mapped" nodes.
+    """
+
     name: Hashable
     indices: tuple[int, ...]
 
@@ -208,11 +220,7 @@ def _get_value_at_index(
     for label, i in index_values:
         # TODO Fix the condition for automatic label detection. We can we ensure we
         # index the correct axis? Should we just use an integer axis index?
-        if (
-            label is None
-            or label.startswith('dim_')
-            or (hasattr(values, 'ndim') and values.ndim == 1)
-        ):
+        if label.startswith('dim_') or (hasattr(values, 'ndim') and values.ndim == 1):
             values = values[i]
         else:
             # This is Scipp notation, Xarray uses the 'isel' method.
@@ -266,8 +274,15 @@ class Graph:
     A Cyclebane graph is a directed acyclic graph with additional array-like structure.
 
     The array-like structure selectively affects nodes in the graph by associating
-    source nodes with an array-like object. The source node and all its descendants
-    thus gain an additional index or dimension.
+    source nodes with an array-like object. These source node and all their descendants
+    thus gain an additional index (or "dimension").
+
+    Nomenclature:
+
+    - Index: As in Pandas, and index is a sequence of values that label an axis.
+    - Index-value: A single value in an index.
+    - Index-name: The name of an index.
+
 
     Notes
     -----
@@ -382,7 +397,7 @@ class Graph:
             The name of the index to reduce over. Only one of index and axis can be
             given.
         axis:
-            The axis to reduce over. Only one of index and axis can be given.
+            Integer axis index to reduce over. Only one of index and axis can be given.
         name:
             The name of the new node. If not given, a unique name is generated.
         attrs:

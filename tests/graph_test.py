@@ -71,7 +71,9 @@ def test_map_raises_if_shapes_of_values_are_incompatible() -> None:
     g.add_edge('b', 'c')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="value sequences in a map operation must have the same shape"
+    ):
         graph.map({'a': [1, 2], 'b': [1, 2, 3]})
 
 
