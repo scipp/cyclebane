@@ -49,24 +49,6 @@ def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
     return graph
 
 
-def _check_for_conflicts(graph: nx.DiGraph, ancestor_graph):
-    for node in ancestor_graph.nodes:
-        if node in graph:
-            if graph.nodes[node] != ancestor_graph.nodes[node]:
-                raise ValueError(
-                    f"Node '{node}' has different attributes in ancestor_graph"
-                )
-            if list(graph.in_edges(node)) != list(ancestor_graph.in_edges(node)):
-                raise ValueError(
-                    f"Node '{node}' has different incoming edges in ancestor_graph"
-                )
-            # TODO The composite graph may add more edges, so this check is bad
-            if list(graph.out_edges(node)) != list(ancestor_graph.out_edges(node)):
-                raise ValueError(
-                    f"Node '{node}' has different outgoing edges in ancestor_graph"
-                )
-
-
 @dataclass(frozen=True)
 class IndexValues:
     axes: tuple[IndexName]
@@ -112,7 +94,7 @@ class IndexValues:
 
 @dataclass(frozen=True)
 class NodeName:
-    name: str
+    name: Hashable
     index: IndexValues
 
     def merge_index(self, other: IndexValues) -> NodeName:
