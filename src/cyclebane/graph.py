@@ -511,7 +511,7 @@ class Graph:
         for node in intersection_nodes:
             if graph.pred[node] != new_branch.pred[node]:
                 raise ValueError(
-                    f"Node inputs differ for '{node}':\n"
+                    f"Node inputs differ for node '{node}':\n"
                     f"  {graph.pred[node]}\n"
                     f"  {new_branch.pred[node]}\n"
                 )

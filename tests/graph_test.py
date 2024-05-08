@@ -505,3 +505,31 @@ def test_setitem_with_other_graph_keeps_nodename_of_key_but_replaces_node_data()
     assert nx_graph.has_edge('d', 'b')
     assert nx_graph.has_edge('b', 'a')
     assert nx_graph.nodes['b'] == {'attr': 2}
+
+
+def test_setitem_raises_on_conflicting_ancestor_node_data() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')
+    g1.nodes['a']['attr'] = 1
+    g1.add_edge('x', 'b')
+    g2 = nx.DiGraph()
+    g2.add_edge('a', 'x')
+    g2.nodes['a']['attr'] = 2
+
+    graph = cb.Graph(g1)
+    with pytest.raises(ValueError, match="Node data differs for node 'a'"):
+        graph['x'] = cb.Graph(g2)
+
+
+def test_setitem_raises_on_conflicting_input_nodes_in_ancestor() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a1', 'b')
+    g1.add_edge('b', 'c')
+    g1.add_edge('x', 'c')
+    g2 = nx.DiGraph()
+    g2.add_edge('a2', 'b')
+    g2.add_edge('b', 'x')
+
+    graph = cb.Graph(g1)
+    with pytest.raises(ValueError, match="Node inputs differ for node 'b'"):
+        graph['x'] = cb.Graph(g2)
