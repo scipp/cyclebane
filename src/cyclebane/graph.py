@@ -127,10 +127,8 @@ def _find_successors(
 ) -> set[Hashable]:
     successors = set()
     for root in root_nodes:
-        if root not in graph:
-            raise ValueError("Node not in graph")
         if graph.in_degree(root) > 0:
-            raise ValueError("Node is not a root node")
+            raise ValueError(f"Mapped node '{root}' is not a source node")
         nodes = nx.dfs_successors(graph, root)
         successors.update(
             set(node for node_list in nodes.values() for node in node_list)
@@ -324,9 +322,9 @@ class Graph:
             support slicing, e.g., NumPy arrays, Xarray DataArrays, Pandas DataFrames,
             etc.
         """
-        for value_mapping in self._node_values.values():
-            if any(node in value_mapping for node in node_values):
-                raise ValueError('Node already has a value')
+        for node in node_values:
+            if any(node in mapping for mapping in self._node_values.values()):
+                raise ValueError(f"Node '{node}' has already been mapped")
         root_nodes = tuple(node_values.keys())
         ndim = len(self.indices)
         indices = {}

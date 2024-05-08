@@ -50,7 +50,7 @@ def test_map_raises_if_mapping_non_source_node() -> None:
     g.add_edge('b', 'c')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Mapped node 'b' is not a source node"):
         graph.map({'b': [1, 2]})
 
 
@@ -61,7 +61,7 @@ def test_map_raises_if_mapping_previously_mapped_source_node() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2]})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
         mapped.map({'a': [1, 2]})
 
 
