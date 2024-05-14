@@ -389,11 +389,13 @@ class NodeValues:
             }
         return {key: ValueArray.from_array_like(values[key]) for key in keys}
 
-    @staticmethod
-    def from_mapping(node_values: Mapping[Hashable, Sequence[Any]]) -> NodeValues:
-        """
-        Create a NodeValues object from a mapping of node names to value sequences.
-        """
+    def append_from_mapping(
+        self, node_values: Mapping[Hashable, Sequence[Any]]
+    ) -> None:
+        """Append from a mapping of node names to value sequences."""
+        for node in node_values:
+            if any(node in mapping for mapping in self._values.keys()):
+                raise ValueError(f"Node '{node}' has already been mapped")
         value_arrays = NodeValues._to_value_arrays(node_values)
         shapes = [array.shape for array in value_arrays.values()]
         if len(set(shapes)) != 1:
@@ -401,13 +403,13 @@ class NodeValues:
                 'All value sequences in a map operation must have the same shape. '
                 'Use multiple map operations if necessary.'
             )
-        return NodeValues(value_arrays)
+        self._values.update(value_arrays)
+
+    def keys(self) -> list[Hashable]:
+        return list(self._values)
 
     def __getitem__(self, keys: list[Hashable]) -> NodeValues:
         """Select a subset of columns."""
-
-    def append(self, other: NodeValues) -> NodeValues:
-        """Append columns from another NodeValues object, raising on conflict"""
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
@@ -451,11 +453,13 @@ class Graph:
         self.indices: dict[IndexName, Iterable[IndexValue]] = {}
         self._value_attr = value_attr
         self._node_values: dict[tuple[IndexName, ...], MappingToArrayLike] = {}
+        self._next_node_values = NodeValues({})
 
     def copy(self) -> Graph:
         graph = Graph(self.graph.copy(), value_attr=self._value_attr)
         graph.indices = dict(self.indices)
         graph._node_values = dict(self._node_values)
+        graph._next_node_values = self._next_node_values
         return graph
 
     @property
@@ -482,9 +486,8 @@ class Graph:
             support slicing, e.g., NumPy arrays, Xarray DataArrays, Pandas DataFrames,
             etc.
         """
-        for node in node_values:
-            if any(node in mapping for mapping in self._node_values.values()):
-                raise ValueError(f"Node '{node}' has already been mapped")
+        # TODO Try creating new helper object
+        self._next_node_values.append_from_mapping(node_values)
         root_nodes = tuple(node_values.keys())
         ndim = len(self.indices)
         indices = {}
@@ -522,8 +525,7 @@ class Graph:
         # values we should consider using a dedicated class NodeValues to encapsulate
         # this complexity.
         out._node_values[named] = node_values
-        # TODO Try creating new helper object
-        NodeValues.from_mapping(node_values)
+        out._next_node_values = self._next_node_values
         return out
 
     def reduce(
