@@ -119,10 +119,10 @@ class MappedNode:
     """
 
     name: Hashable
-    indices: tuple[int, ...]
+    indices: tuple[IndexName, ...]
 
 
-def node_with_indices(node: Hashable, indices: tuple[int, ...]) -> MappedNode:
+def node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> MappedNode:
     if isinstance(node, MappedNode):
         return MappedNode(name=node.name, indices=indices + node.indices)
     return MappedNode(name=node, indices=indices)
@@ -277,9 +277,8 @@ class ValueArray:
 
     @staticmethod
     def from_array_like(values: Any, *, axis_zero: int = 0) -> ValueArray:
-        # TODO Better check for Scipp
-        if hasattr(values, 'unit'):
-            return ScippDataArrayAdapter(values)
+        if hasattr(values, 'dims'):
+            return DataArrayAdapter(values)
         return NumpyArrayAdapter(values, axis_zero=axis_zero)
 
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
@@ -299,8 +298,9 @@ class ValueArray:
 
 
 class PandasSeriesAdapter(ValueArray):
-    def __init__(self, series):
+    def __init__(self, series, *, axis_zero: int = 0):
         self._series = series
+        self._axis_zero = axis_zero
 
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
@@ -317,17 +317,22 @@ class PandasSeriesAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        return {self._series.index.name: self._series.index}
+        name = (
+            self._series.index.name
+            if self._series.index.name is not None
+            else f'dim_{self._axis_zero}'
+        )
+        return {name: self._series.index}
 
 
-class ScippDataArrayAdapter(ValueArray):
+class DataArrayAdapter(ValueArray):
     def __init__(self, data_array):
         self._data_array = data_array
 
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
-    ) -> ScippDataArrayAdapter:
-        return ScippDataArrayAdapter(self._data_array[key])
+    ) -> DataArrayAdapter:
+        return DataArrayAdapter(self._data_array[key])
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -382,12 +387,12 @@ class NodeValues:
         self, values: Mapping[Hashable, Sequence[Any]]
     ) -> Mapping[Hashable, ValueArray]:
         keys = tuple(values)
+        ndim = len(self.indices)
         if (columns := getattr(values, 'columns', None)) is not None:
             return {
-                key: PandasSeriesAdapter(values.iloc[:, i])
+                key: PandasSeriesAdapter(values.iloc[:, i], axis_zero=ndim)
                 for key, i in zip(keys, range(len(columns)))
             }
-        ndim = len(self.indices)
         return {
             key: ValueArray.from_array_like(values[key], axis_zero=ndim) for key in keys
         }
@@ -463,14 +468,12 @@ class Graph:
 
     def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
         self.graph = graph
-        self.indices: dict[IndexName, Iterable[IndexValue]] = {}
         self._value_attr = value_attr
         self._node_values: dict[tuple[IndexName, ...], MappingToArrayLike] = {}
         self._next_node_values = NodeValues({})
 
     def copy(self) -> Graph:
         graph = Graph(self.graph.copy(), value_attr=self._value_attr)
-        graph.indices = dict(self.indices)
         graph._node_values = dict(self._node_values)
         graph._next_node_values = self._next_node_values
         return graph
@@ -501,14 +504,11 @@ class Graph:
         """
         _next_node_values = self._next_node_values.merge_from_mapping(node_values)
         root_nodes = tuple(node_values.keys())
-        ndim = len(self.indices)
-        indices = {}
-        for name, values in _get_indices(node_values):
-            if name is None:
-                name = f'dim_{ndim}'
-                ndim += 1
-            indices[name] = values
-        named = tuple(indices)
+        named = tuple(
+            idx
+            for idx in _next_node_values.indices
+            if idx not in self._next_node_values.indices
+        )
 
         # Make sure root nodes exist in graph, add them if not. This choice allows for
         # mapping, e.g., with multiple columns from a DataFrame, representing labels
@@ -524,8 +524,6 @@ class Graph:
         graph = nx.relabel_nodes(graph, name_mapping)
 
         out = Graph(graph)
-        # TODO order?
-        out.indices = {**indices, **self.indices}
         out._node_values = dict(self._node_values)
         # TODO When removing nodes, e.g., via __getitem__, we should remove also the
         # node values. We need to make a shallow copy though, or extract columns and
@@ -535,6 +533,10 @@ class Graph:
         out._node_values[named] = node_values
         out._next_node_values = _next_node_values
         return out
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return self._next_node_values.indices
 
     def reduce(
         self,
@@ -594,8 +596,8 @@ class Graph:
         graph.add_edge(key, name)
 
         out = Graph(graph)
-        out.indices = dict(self.indices)
         out._node_values = dict(self._node_values)
+        out._next_node_values = self._next_node_values
         return out
 
     def _from_orig_key(self, key: Hashable) -> Hashable:
@@ -670,17 +672,9 @@ class Graph:
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
         out = Graph(self.graph.subgraph(ancestors))
-        if isinstance(key, MappedNode):
-            out.indices = {
-                name: index
-                for name, index in self.indices.items()
-                if name in key.indices
-            }
-        else:
-            out.indices = {}
-        # TODO Only keep node values for nodes in the subgraph
-        # If Graph.indices was dynamic, couldn't we remove the above indices filter?
         out._node_values = dict(self._node_values)
+        # TODO Only keep node values for nodes in the subgraph
+        out._next_node_values = self._next_node_values
         return out
 
     def __setitem__(self, branch: Hashable | slice, other: Graph) -> None:
