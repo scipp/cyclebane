@@ -303,11 +303,11 @@ def test_map_reduce() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
-    reduced = mapped.reduce('c', name='func', axis=1)
+    reduced = mapped.reduce(name='func', axis=1)
     # Axis 0 reduces 'x', so there are 2 reduce nodes.
     assert len(reduced.to_networkx().nodes) == 19
     # Axis 1 reduces 'a', so there are 3 reduce nodes.
-    reduced = mapped.reduce('c', name='func', axis=0)
+    reduced = mapped.reduce(name='func', axis=0)
     assert len(reduced.to_networkx().nodes) == 20
 
     a_data = [
@@ -326,7 +326,7 @@ def test_reduce_all_axes() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]}).map({'b': [4, 5]})
-    reduced = mapped.reduce('c', name='sum', attrs={'func': 'sum'})
+    reduced = mapped.reduce(name='sum', attrs={'func': 'sum'})
     # No axis or index given, all axes are reduced, so the new node has no index part.
     assert 'sum' in reduced.graph
     assert reduced.graph.nodes['sum'] == {'func': 'sum'}
@@ -349,7 +349,7 @@ def test_reduce_raises_if_new_node_name_exists() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
     with pytest.raises(ValueError):
-        mapped.reduce('c', name='other')
+        mapped.reduce(name='other')
 
 
 @pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
@@ -361,7 +361,7 @@ def test_reduce_raises_if_axis_or_does_not_exist(indexer) -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': sc.arange('x', 3)})
     with pytest.raises(ValueError):
-        mapped.reduce('c', name='combine', **indexer)
+        mapped.reduce(name='combine', **indexer)
 
 
 @pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
@@ -484,3 +484,52 @@ def test_setitem_raises_TypeError_if_given_networkx_graph() -> None:
     graph = cb.Graph(g)
     with pytest.raises(TypeError):
         graph['a'] = nx.DiGraph()
+
+
+def test_setitem_with_other_graph_keeps_nodename_of_key_but_replaces_node_data() -> (
+    None
+):
+    g1 = nx.DiGraph()
+    g1.add_edge('b', 'a')
+    g1.nodes['b']['attr'] = 1
+    g2 = nx.DiGraph()
+    g2.add_edge('d', 'c')
+    g2.nodes['c']['attr'] = 2
+
+    graph = cb.Graph(g1)
+    graph['b'] = cb.Graph(g2)
+    assert 'b' in graph.to_networkx()
+    nx_graph = graph.to_networkx()
+    assert set(nx_graph.nodes) == {'a', 'b', 'd'}
+    assert len(nx_graph.edges) == 2
+    assert nx_graph.has_edge('d', 'b')
+    assert nx_graph.has_edge('b', 'a')
+    assert nx_graph.nodes['b'] == {'attr': 2}
+
+
+def test_setitem_raises_on_conflicting_ancestor_node_data() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')
+    g1.nodes['a']['attr'] = 1
+    g1.add_edge('x', 'b')
+    g2 = nx.DiGraph()
+    g2.add_edge('a', 'x')
+    g2.nodes['a']['attr'] = 2
+
+    graph = cb.Graph(g1)
+    with pytest.raises(ValueError, match="Node data differs for node 'a'"):
+        graph['x'] = cb.Graph(g2)
+
+
+def test_setitem_raises_on_conflicting_input_nodes_in_ancestor() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a1', 'b')
+    g1.add_edge('b', 'c')
+    g1.add_edge('x', 'c')
+    g2 = nx.DiGraph()
+    g2.add_edge('a2', 'b')
+    g2.add_edge('b', 'x')
+
+    graph = cb.Graph(g1)
+    with pytest.raises(ValueError, match="Node inputs differ for node 'b'"):
+        graph['x'] = cb.Graph(g2)
