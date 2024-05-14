@@ -276,11 +276,11 @@ class ValueArray:
     """A series of values with an index that can be sliced."""
 
     @staticmethod
-    def from_array_like(values: Any) -> ValueArray:
+    def from_array_like(values: Any, *, axis_zero: int = 0) -> ValueArray:
         # TODO Better check for Scipp
         if hasattr(values, 'unit'):
             return ScippDataArrayAdapter(values)
-        return NumpyArrayAdapter(values)
+        return NumpyArrayAdapter(values, axis_zero=axis_zero)
 
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
         pass
@@ -339,7 +339,8 @@ class ScippDataArrayAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        return {name: self._data_array.coords[name] for name in self.index_names}
+        # TODO Cannot be range after slicing!
+        return {name: range(size) for name, size in zip(self.index_names, self.shape)}
 
 
 class NumpyArrayAdapter(ValueArray):
@@ -377,9 +378,8 @@ class NodeValues:
     def __init__(self, values: Mapping[Hashable, ValueArray]):
         self._values = values
 
-    @staticmethod
     def _to_value_arrays(
-        values: Mapping[Hashable, Sequence[Any]]
+        self, values: Mapping[Hashable, Sequence[Any]]
     ) -> Mapping[Hashable, ValueArray]:
         keys = tuple(values)
         if (columns := getattr(values, 'columns', None)) is not None:
@@ -387,23 +387,32 @@ class NodeValues:
                 key: PandasSeriesAdapter(values.iloc[:, i])
                 for key, i in zip(keys, range(len(columns)))
             }
-        return {key: ValueArray.from_array_like(values[key]) for key in keys}
+        ndim = len(self.indices)
+        return {
+            key: ValueArray.from_array_like(values[key], axis_zero=ndim) for key in keys
+        }
 
-    def append_from_mapping(
+    def merge_from_mapping(
         self, node_values: Mapping[Hashable, Sequence[Any]]
-    ) -> None:
+    ) -> NodeValues:
         """Append from a mapping of node names to value sequences."""
         for node in node_values:
             if any(node in mapping for mapping in self._values.keys()):
                 raise ValueError(f"Node '{node}' has already been mapped")
-        value_arrays = NodeValues._to_value_arrays(node_values)
+        value_arrays = self._to_value_arrays(node_values)
         shapes = [array.shape for array in value_arrays.values()]
         if len(set(shapes)) != 1:
             raise ValueError(
                 'All value sequences in a map operation must have the same shape. '
                 'Use multiple map operations if necessary.'
             )
-        self._values.update(value_arrays)
+        named = next(iter(value_arrays.values())).index_names
+        if any([name in self.indices for name in named]):
+            raise ValueError(
+                f'Conflicting new index names {named} with existing '
+                f'{list(self.indices)}'
+            )
+        return NodeValues({**self._values, **value_arrays})
 
     def keys(self) -> list[Hashable]:
         return list(self._values)
@@ -414,6 +423,10 @@ class NodeValues:
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
         """Return the indices of the NodeValues object."""
+        value_indices = [value.indices for value in self._values.values()]
+        return {
+            name: index for indices in value_indices for name, index in indices.items()
+        }
 
 
 class Graph:
@@ -486,8 +499,7 @@ class Graph:
             support slicing, e.g., NumPy arrays, Xarray DataArrays, Pandas DataFrames,
             etc.
         """
-        # TODO Try creating new helper object
-        self._next_node_values.append_from_mapping(node_values)
+        _next_node_values = self._next_node_values.merge_from_mapping(node_values)
         root_nodes = tuple(node_values.keys())
         ndim = len(self.indices)
         indices = {}
@@ -497,10 +509,6 @@ class Graph:
                 ndim += 1
             indices[name] = values
         named = tuple(indices)
-        if any([name in self.index_names for name in named]):
-            raise ValueError(
-                f'Conflicting new index names {named} with existing {self.index_names}'
-            )
 
         # Make sure root nodes exist in graph, add them if not. This choice allows for
         # mapping, e.g., with multiple columns from a DataFrame, representing labels
@@ -525,7 +533,7 @@ class Graph:
         # values we should consider using a dedicated class NodeValues to encapsulate
         # this complexity.
         out._node_values[named] = node_values
-        out._next_node_values = self._next_node_values
+        out._next_node_values = _next_node_values
         return out
 
     def reduce(
