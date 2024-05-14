@@ -256,6 +256,9 @@ class PositionalIndexer:
                 for name, col in values.items()
             }
 
+        # TODO having to slice indices and values independently shows design problem.
+        # Why can't we just keep, e.g., the DataFrames and op on those?
+        # Can Graph.indices be computed dynamically?
         out.indices = {
             name: slice_index(name, index) for name, index in self.graph.indices.items()
         }
@@ -267,6 +270,148 @@ class PositionalIndexer:
 
 
 MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
+
+
+class ValueArray:
+    """A series of values with an index that can be sliced."""
+
+    @staticmethod
+    def from_array_like(values: Any) -> ValueArray:
+        # TODO Better check for Scipp
+        if hasattr(values, 'unit'):
+            return ScippDataArrayAdapter(values)
+        return NumpyArrayAdapter(values)
+
+    def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
+        pass
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        pass
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        pass
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        pass
+
+
+class PandasSeriesAdapter(ValueArray):
+    def __init__(self, series):
+        self._series = series
+
+    def __getitem__(
+        self, key: int | slice | tuple[int | slice, ...]
+    ) -> PandasSeriesAdapter:
+        return PandasSeriesAdapter(self._series[key])
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return (len(self._series),)
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        return (self._series.index.name,)
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return {self._series.index.name: self._series.index}
+
+
+class ScippDataArrayAdapter(ValueArray):
+    def __init__(self, data_array):
+        self._data_array = data_array
+
+    def __getitem__(
+        self, key: int | slice | tuple[int | slice, ...]
+    ) -> ScippDataArrayAdapter:
+        return ScippDataArrayAdapter(self._data_array[key])
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self._data_array.shape
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        return tuple(self._data_array.dims)
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return {name: self._data_array.coords[name] for name in self.index_names}
+
+
+class NumpyArrayAdapter(ValueArray):
+    def __init__(self, array, *, axis_zero: int = 0):
+        import numpy as np
+
+        self._array = np.asarray(array)
+        self._axis_zero = axis_zero
+
+    def __getitem__(
+        self, key: int | slice | tuple[int | slice, ...]
+    ) -> NumpyArrayAdapter:
+        return NumpyArrayAdapter(self._array[key], axis_zero=self._axis_zero)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self._array.shape
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        return tuple(f'dim_{i+self._axis_zero}' for i in range(self._array.ndim))
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        # TODO Cannot be range after slicing!
+        return {name: range(size) for name, size in zip(self.index_names, self.shape)}
+
+
+# TODO add adapter class performing the logic of _get_indices, abstracting differences
+# between DataFrame, DataArray, ndarray, ..., such that NodeValues can operate on the
+# adapter class on a common interface
+class NodeValues:
+    """A collection of pandas.DataFrame-like objects with distinct indices."""
+
+    def __init__(self, values: Mapping[Hashable, ValueArray]):
+        self._values = values
+
+    @staticmethod
+    def _to_value_arrays(
+        values: Mapping[Hashable, Sequence[Any]]
+    ) -> Mapping[Hashable, ValueArray]:
+        keys = tuple(values)
+        if (columns := getattr(values, 'columns', None)) is not None:
+            return {
+                key: PandasSeriesAdapter(values.iloc[:, i])
+                for key, i in zip(keys, range(len(columns)))
+            }
+        return {key: ValueArray.from_array_like(values[key]) for key in keys}
+
+    @staticmethod
+    def from_mapping(node_values: Mapping[Hashable, Sequence[Any]]) -> NodeValues:
+        """
+        Create a NodeValues object from a mapping of node names to value sequences.
+        """
+        value_arrays = NodeValues._to_value_arrays(node_values)
+        shapes = [array.shape for array in value_arrays.values()]
+        if len(set(shapes)) != 1:
+            raise ValueError(
+                'All value sequences in a map operation must have the same shape. '
+                'Use multiple map operations if necessary.'
+            )
+        return NodeValues(value_arrays)
+
+    def __getitem__(self, keys: list[Hashable]) -> NodeValues:
+        """Select a subset of columns."""
+
+    def append(self, other: NodeValues) -> NodeValues:
+        """Append columns from another NodeValues object, raising on conflict"""
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        """Return the indices of the NodeValues object."""
 
 
 class Graph:
@@ -377,6 +522,8 @@ class Graph:
         # values we should consider using a dedicated class NodeValues to encapsulate
         # this complexity.
         out._node_values[named] = node_values
+        # TODO Try creating new helper object
+        NodeValues.from_mapping(node_values)
         return out
 
     def reduce(
@@ -522,6 +669,7 @@ class Graph:
         else:
             out.indices = {}
         # TODO Only keep node values for nodes in the subgraph
+        # If Graph.indices was dynamic, couldn't we remove the above indices filter?
         out._node_values = dict(self._node_values)
         return out
 
