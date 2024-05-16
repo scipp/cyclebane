@@ -212,22 +212,6 @@ def _yield_index(
                 yield ((name, index_value),) + rest
 
 
-def _get_value_at_index(
-    values: Sequence[Any], index_values: list[tuple[IndexName, IndexValue]]
-) -> Any:
-    if hasattr(values, 'isel'):
-        return values.isel(dict(index_values))
-    for label, i in index_values:
-        # TODO Fix the condition for automatic label detection. We can we ensure we
-        # index the correct axis? Should we just use an integer axis index?
-        if label.startswith('dim_') or (hasattr(values, 'ndim') and values.ndim == 1):
-            values = values[i]
-        else:
-            # This is Scipp notation, Xarray uses the 'isel' method.
-            values = values[(label, i)]
-    return values
-
-
 class PositionalIndexer:
     def __init__(self, graph: Graph, index_name: IndexName):
         self.graph = graph
@@ -256,6 +240,7 @@ class PositionalIndexer:
                 for name, col in values.items()
             }
 
+        # TODO all broken here?
         # TODO having to slice indices and values independently shows design problem.
         # Why can't we just keep, e.g., the DataFrames and op on those?
         # Can Graph.indices be computed dynamically?
@@ -281,6 +266,9 @@ class ValueArray:
             return DataArrayAdapter(values)
         return NumpyArrayAdapter(values, axis_zero=axis_zero)
 
+    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        pass
+
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
         pass
 
@@ -301,6 +289,12 @@ class PandasSeriesAdapter(ValueArray):
     def __init__(self, series, *, axis_zero: int = 0):
         self._series = series
         self._axis_zero = axis_zero
+
+    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        if len(key) != 1:
+            raise ValueError('PandasSeriesAdapter only supports single index')
+        _, i = key[0]
+        return self._series.loc[i]
 
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
@@ -329,6 +323,15 @@ class DataArrayAdapter(ValueArray):
     def __init__(self, data_array):
         self._data_array = data_array
 
+    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        if hasattr(self._data_array, 'isel'):
+            return self._data_array.isel(dict(key))
+        values = self._data_array
+        for label, i in key:
+            # This is Scipp notation, Xarray uses the 'isel' method.
+            values = values[(label, i)]
+        return values
+
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
     ) -> DataArrayAdapter:
@@ -354,6 +357,9 @@ class NumpyArrayAdapter(ValueArray):
 
         self._array = np.asarray(array)
         self._axis_zero = axis_zero
+
+    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        return self._array[tuple(i for _, i in key)]
 
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
@@ -469,12 +475,10 @@ class Graph:
     def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
         self.graph = graph
         self._value_attr = value_attr
-        self._node_values: dict[tuple[IndexName, ...], MappingToArrayLike] = {}
         self._next_node_values = NodeValues({})
 
     def copy(self) -> Graph:
         graph = Graph(self.graph.copy(), value_attr=self._value_attr)
-        graph._node_values = dict(self._node_values)
         graph._next_node_values = self._next_node_values
         return graph
 
@@ -485,6 +489,10 @@ class Graph:
     @property
     def index_names(self) -> tuple[IndexName]:
         return tuple(self.indices)
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return self._next_node_values.indices
 
     def map(self, node_values: MappingToArrayLike) -> Graph:
         """
@@ -524,19 +532,13 @@ class Graph:
         graph = nx.relabel_nodes(graph, name_mapping)
 
         out = Graph(graph)
-        out._node_values = dict(self._node_values)
         # TODO When removing nodes, e.g., via __getitem__, we should remove also the
         # node values. We need to make a shallow copy though, or extract columns and
         # store them individually. As we basically want do to indexing ops on the node
         # values we should consider using a dedicated class NodeValues to encapsulate
         # this complexity.
-        out._node_values[named] = node_values
         out._next_node_values = _next_node_values
         return out
-
-    @property
-    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        return self._next_node_values.indices
 
     def reduce(
         self,
@@ -596,7 +598,6 @@ class Graph:
         graph.add_edge(key, name)
 
         out = Graph(graph)
-        out._node_values = dict(self._node_values)
         out._next_node_values = self._next_node_values
         return out
 
@@ -647,15 +648,10 @@ class Graph:
         graph = nx.relabel_nodes(graph, new_names)
 
         # Get values using previously stored index values
-        for values in self._node_values.values():
-            for name, col in values.items():
-                for match in [
-                    node
-                    for node in graph.nodes
-                    if isinstance(node, NodeName) and node.name == name
-                ]:
-                    value = _get_value_at_index(col, match.index.to_tuple())
-                    graph.nodes[match][self.value_attr] = value
+        for name, col in self._next_node_values._values.items():
+            for node in graph.nodes:
+                if isinstance(node, NodeName) and node.name == name:
+                    graph.nodes[node][self.value_attr] = col.isel(node.index.to_tuple())
 
         return graph
 
@@ -672,7 +668,6 @@ class Graph:
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
         out = Graph(self.graph.subgraph(ancestors))
-        out._node_values = dict(self._node_values)
         # TODO Only keep node values for nodes in the subgraph
         out._next_node_values = self._next_node_values
         return out
@@ -713,5 +708,6 @@ class Graph:
 
         # Delay setting graph until we know no step fails
         self.graph = graph
-        self.indices.update(other.indices)
-        self._node_values.update(other._node_values)
+        # TODO
+        # self.indices.update(other.indices)
+        # self._node_values.update(other._node_values)
