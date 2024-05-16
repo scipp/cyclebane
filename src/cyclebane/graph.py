@@ -417,6 +417,9 @@ class NodeValues:
                 'All value sequences in a map operation must have the same shape. '
                 'Use multiple map operations if necessary.'
             )
+        return self.merge(value_arrays)
+
+    def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
         named = next(iter(value_arrays.values())).index_names
         if any([name in self.indices for name in named]):
             raise ValueError(
@@ -428,8 +431,19 @@ class NodeValues:
     def keys(self) -> list[Hashable]:
         return list(self._values)
 
-    def __getitem__(self, keys: list[Hashable]) -> NodeValues:
+    def values(self) -> list[ValueArray]:
+        return list(self._values.values())
+
+    def items(self) -> list[tuple[Hashable, ValueArray]]:
+        return list(self._values.items())
+
+    def __getitem__(self, key: Hashable) -> ValueArray:
+        """Select a columns."""
+        return self._values[key]
+
+    def get_columns(self, keys: list[Hashable]) -> NodeValues:
         """Select a subset of columns."""
+        return NodeValues({key: self._values[key] for key in keys})
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
@@ -472,15 +486,23 @@ class Graph:
       though, which also needs to select a subset of the mapped arrays.
     """
 
-    def __init__(self, graph: nx.DiGraph, *, value_attr: str = 'value'):
+    def __init__(
+        self,
+        graph: nx.DiGraph,
+        *,
+        node_values: NodeValues | None = None,
+        value_attr: str = 'value',
+    ):
         self.graph = graph
         self._value_attr = value_attr
-        self._next_node_values = NodeValues({})
+        self._next_node_values = node_values or NodeValues({})
 
     def copy(self) -> Graph:
-        graph = Graph(self.graph.copy(), value_attr=self._value_attr)
-        graph._next_node_values = self._next_node_values
-        return graph
+        return Graph(
+            self.graph.copy(),
+            node_values=self._next_node_values,
+            value_attr=self._value_attr,
+        )
 
     @property
     def value_attr(self) -> str:
@@ -529,16 +551,17 @@ class Graph:
         name_mapping: dict[Hashable, MappedNode] = {}
         for node in successors:
             name_mapping[node] = node_with_indices(node, named)
-        graph = nx.relabel_nodes(graph, name_mapping)
 
-        out = Graph(graph)
         # TODO When removing nodes, e.g., via __getitem__, we should remove also the
         # node values. We need to make a shallow copy though, or extract columns and
         # store them individually. As we basically want do to indexing ops on the node
         # values we should consider using a dedicated class NodeValues to encapsulate
         # this complexity.
-        out._next_node_values = _next_node_values
-        return out
+        return Graph(
+            nx.relabel_nodes(graph, name_mapping),
+            node_values=_next_node_values,
+            value_attr=self.value_attr,
+        )
 
     def reduce(
         self,
@@ -597,9 +620,9 @@ class Graph:
         graph.add_node(name, **attrs)
         graph.add_edge(key, name)
 
-        out = Graph(graph)
-        out._next_node_values = self._next_node_values
-        return out
+        return Graph(
+            graph, node_values=self._next_node_values, value_attr=self.value_attr
+        )
 
     def _from_orig_key(self, key: Hashable) -> Hashable:
         # Graph.map relabels nodes to include index names, which can be inconvenient
@@ -648,7 +671,7 @@ class Graph:
         graph = nx.relabel_nodes(graph, new_names)
 
         # Get values using previously stored index values
-        for name, col in self._next_node_values._values.items():
+        for name, col in self._next_node_values.items():
             for node in graph.nodes:
                 if isinstance(node, NodeName) and node.name == name:
                     graph.nodes[node][self.value_attr] = col.isel(node.index.to_tuple())
@@ -667,10 +690,14 @@ class Graph:
         key = self._from_orig_key(key)
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
-        out = Graph(self.graph.subgraph(ancestors))
-        # TODO Only keep node values for nodes in the subgraph
-        out._next_node_values = self._next_node_values
-        return out
+        # Drop all node values that are not in the branch
+        mapped = set(a.name for a in ancestors if isinstance(a, MappedNode))
+        keep_values = [key for key in self._next_node_values.keys() if key in mapped]
+        return Graph(
+            self.graph.subgraph(ancestors),
+            node_values=self._next_node_values.get_columns(keep_values),
+            value_attr=self.value_attr,
+        )
 
     def __setitem__(self, branch: Hashable | slice, other: Graph) -> None:
         """
@@ -707,7 +734,6 @@ class Graph:
         graph = nx.compose(graph, new_branch)
 
         # Delay setting graph until we know no step fails
+        # TODO This is not working yet as it should
+        self._next_node_values = self._next_node_values.merge(other._next_node_values)
         self.graph = graph
-        # TODO
-        # self.indices.update(other.indices)
-        # self._node_values.update(other._node_values)

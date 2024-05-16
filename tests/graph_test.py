@@ -554,3 +554,17 @@ def test_getitem_keeps_only_relevant_indices() -> None:
     assert mapped['a'].indices == {'dim_0': range(3)}
     assert mapped['b'].indices == {}  # Not mapped
     assert mapped['c'].indices == {'dim_0': range(3)}
+
+
+def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
+    mapped['b'] = b
+    # TODO
+    assert len(mapped.index_names) == 1
+    assert mapped.indices == 1
