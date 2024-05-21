@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2023 Scipp contributors (https://github.com/scipp)
+from typing import Hashable, Mapping, Sequence
+
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -162,7 +164,6 @@ def test_map_2d_xarray_dataarray() -> None:
 
     graph = cb.Graph(g)
     da = xr.DataArray(dims=('x', 'y'), data=[[1, 2, 3], [4, 5, 6]])
-    print(da, da.dims, da.shape)
     mapped = graph.map({'a': da})
     assert len(mapped.to_networkx().nodes) == 3 * 2 * 2
 
@@ -568,14 +569,21 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
         mapped['b'] = b
 
 
-def test_slice_by_position() -> None:
+@pytest.mark.parametrize(
+    'param_table',
+    [{'a': [1, 2, 3]}, {'a': np.array([1, 2, 3])}, pd.DataFrame({'a': [1, 2, 3]})],
+)
+def test_slice_by_position(param_table: Mapping[Hashable, Sequence[int]]) -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
-    mapped = graph.map({'a': [1, 2, 3]})
+    mapped = graph.map(param_table)
     sliced = mapped.by_position('dim_0')[1:3]
     result = sliced.to_networkx()
+    assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (0,))) not in result
+    assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (1,))) in result
+    assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (2,))) in result
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]

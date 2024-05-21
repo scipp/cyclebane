@@ -59,7 +59,7 @@ class PandasSeriesAdapter(ValueArray):
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
     ) -> PandasSeriesAdapter:
-        return PandasSeriesAdapter(self._series[key])
+        return PandasSeriesAdapter(self._series[key], axis_zero=self._axis_zero)
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -67,7 +67,7 @@ class PandasSeriesAdapter(ValueArray):
 
     @property
     def index_names(self) -> tuple[IndexName, ...]:
-        return (self._series.index.name,)
+        return tuple(self.indices)
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
@@ -80,10 +80,17 @@ class PandasSeriesAdapter(ValueArray):
 
 
 class DataArrayAdapter(ValueArray):
-    def __init__(self, data_array):
+    def __init__(
+        self,
+        data_array,
+    ):
         self._data_array = data_array
 
     def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        # Note: Eventually we will want to distinguish between dims without coords,
+        # where we will use a range index, and dims with coords, where we will use the
+        # coord as an index. For now everything is a range index.
+        # We use isel because of sel, since we default to range indices for now.
         if hasattr(self._data_array, 'isel'):
             return self._data_array.isel(dict(key))
         values = self._data_array
@@ -107,24 +114,45 @@ class DataArrayAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        # TODO Cannot be range after slicing!
+        # TODO Cannot be range after slicing! This is currently inconsistent with how
+        # NumPy and iterable adapters work.
         return {name: range(size) for name, size in zip(self.index_names, self.shape)}
 
 
 class NumpyArrayAdapter(ValueArray):
-    def __init__(self, array, *, axis_zero: int = 0):
+    def __init__(
+        self,
+        array,
+        *,
+        indices: dict[IndexName, Iterable[IndexValue]] | None = None,
+        axis_zero: int = 0,
+    ):
         import numpy as np
 
         self._array = np.asarray(array)
+        if indices is None:
+            indices = {
+                f'dim_{i+axis_zero}': range(size)
+                for i, size in enumerate(self._array.shape)
+            }
+        self._indices = indices
         self._axis_zero = axis_zero
 
     def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
-        return self._array[tuple(i for _, i in key)]
+        index_tuple = tuple(self._indices[k].index(i) for k, i in key)
+        return self._array[index_tuple]
 
-    def __getitem__(
-        self, key: int | slice | tuple[int | slice, ...]
-    ) -> NumpyArrayAdapter:
-        return NumpyArrayAdapter(self._array[key], axis_zero=self._axis_zero)
+    def __getitem__(self, key: int | slice) -> NumpyArrayAdapter:
+        if isinstance(key, tuple):
+            raise NotImplementedError('Cannot select from multi-dim value array')
+        return NumpyArrayAdapter(
+            self._array[key],
+            indices={
+                index_name: index_values[key]
+                for index_name, index_values in self._indices.items()
+            },
+            axis_zero=self._axis_zero,
+        )
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -136,8 +164,7 @@ class NumpyArrayAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        # TODO Cannot be range after slicing!
-        return {name: range(size) for name, size in zip(self.index_names, self.shape)}
+        return self._indices
 
 
 class IterableAdapter(ValueArray):
