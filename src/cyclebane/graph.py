@@ -188,9 +188,7 @@ class PositionalIndexer:
                 for name, col in self.graph._node_values.items()
             }
         )
-        return Graph(
-            self.graph.graph, node_values=node_values, value_attr=self.graph.value_attr
-        )
+        return Graph(self.graph.graph, node_values=node_values)
 
 
 MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
@@ -222,34 +220,33 @@ class Graph:
       objects at nodes with multiple predecessors.
     """
 
-    def __init__(
-        self,
-        graph: nx.DiGraph,
-        *,
-        node_values: NodeValues | None = None,
-        value_attr: str = 'value',
-    ):
+    def __init__(self, graph: nx.DiGraph, *, node_values: NodeValues | None = None):
+        """
+        Initialize a graph from a directed NetworkX graph.
+
+        Parameters
+        ----------
+        graph:
+            The directed graph representing the data flow.
+        node_values:
+            A mapping from source node names to array-like objects. The implementation
+            assumes that the graph has been setup correctly. Do not use this argument
+            unless you know what you are doing.
+        """
         self.graph = graph
-        self._value_attr = value_attr
         self._node_values = node_values or NodeValues({})
 
     def copy(self) -> Graph:
-        return Graph(
-            self.graph.copy(),
-            node_values=self._node_values,
-            value_attr=self._value_attr,
-        )
-
-    @property
-    def value_attr(self) -> str:
-        return self._value_attr
+        return Graph(self.graph.copy(), node_values=self._node_values)
 
     @property
     def index_names(self) -> tuple[IndexName]:
+        """Names of the indices (dimensions) of the graph."""
         return tuple(self.indices)
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        """Names and values of the indices of the graph."""
         return self._node_values.indices
 
     def map(self, node_values: MappingToArrayLike) -> Graph:
@@ -286,11 +283,7 @@ class Graph:
         for node in successors:
             name_mapping[node] = _node_with_indices(node, named)
 
-        return Graph(
-            nx.relabel_nodes(graph, name_mapping),
-            node_values=_node_values,
-            value_attr=self.value_attr,
-        )
+        return Graph(nx.relabel_nodes(graph, name_mapping), node_values=_node_values)
 
     def reduce(
         self,
@@ -349,7 +342,7 @@ class Graph:
         graph.add_node(name, **attrs)
         graph.add_edge(key, name)
 
-        return Graph(graph, node_values=self._node_values, value_attr=self.value_attr)
+        return Graph(graph, node_values=self._node_values)
 
     def _from_orig_key(self, key: Hashable) -> Hashable:
         # Graph.map relabels nodes to include index names, which can be inconvenient
@@ -371,7 +364,16 @@ class Graph:
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
         return PositionalIndexer(self, index_name)
 
-    def to_networkx(self) -> nx.DiGraph:
+    def to_networkx(self, value_attr: str = 'value') -> nx.DiGraph:
+        """
+        Convert to a NetworkX graph, spelling out the internal array structures as
+        explicit nodes.
+
+        Parameters
+        ----------
+        value_attr:
+            The name of the attribute on nodes that holds the array-like object.
+        """
         graph = self.graph
         for index_name, index in reversed(self.indices.items()):
             # Find all nodes with this index
@@ -401,7 +403,7 @@ class Graph:
         for name, col in self._node_values.items():
             for node in graph.nodes:
                 if isinstance(node, NodeName) and node.name == name:
-                    graph.nodes[node][self.value_attr] = col.sel(node.index.to_tuple())
+                    graph.nodes[node][value_attr] = col.sel(node.index.to_tuple())
 
         return graph
 
@@ -423,7 +425,6 @@ class Graph:
         return Graph(
             self.graph.subgraph(ancestors),
             node_values=self._node_values.get_columns(keep_values),
-            value_attr=self.value_attr,
         )
 
     def __setitem__(self, branch: Hashable | slice, other: Graph) -> None:
