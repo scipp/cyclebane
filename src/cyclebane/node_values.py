@@ -26,7 +26,7 @@ class ValueArray(ABC):
             return DataArrayAdapter(values)
         if values.__class__.__name__ == 'ndarray':
             return NumpyArrayAdapter(values, axis_zero=axis_zero)
-        return IterableAdapter(values, index=range(len(values)), axis_zero=axis_zero)
+        return IterableAdapter(values, axis_zero=axis_zero)
 
     @abstractmethod
     def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
@@ -97,7 +97,7 @@ class DataArrayAdapter(ValueArray):
         # Note: Eventually we will want to distinguish between dims without coords,
         # where we will use a range index, and dims with coords, where we will use the
         # coord as an index. For now everything is a range index.
-        # We use isel because of sel, since we default to range indices for now.
+        # We use isel instead of sel, since we default to range indices for now.
         if hasattr(self._data_array, 'isel'):
             return self._data_array.isel(dict(key))
         values = self._data_array
@@ -109,6 +109,10 @@ class DataArrayAdapter(ValueArray):
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
     ) -> DataArrayAdapter:
+        # We have not implemented slicing that correctly handles the range-index setup
+        # in, e.g., self.indices. This is a placeholder implementation.
+        raise NotImplementedError('DataArrayAdapter does not support slicing')
+        # If we insert range indices as coords, this implementation will work.
         return DataArrayAdapter(self._data_array[key])
 
     @property
@@ -121,8 +125,6 @@ class DataArrayAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        # TODO Cannot be range after slicing! This is currently inconsistent with how
-        # NumPy and iterable adapters work.
         return {name: range(size) for name, size in zip(self.index_names, self.shape)}
 
 
@@ -176,10 +178,14 @@ class NumpyArrayAdapter(ValueArray):
 
 class IterableAdapter(ValueArray):
     def __init__(
-        self, values: Sequence[Any], *, index: Iterable[IndexValue], axis_zero: int = 0
+        self,
+        values: Sequence[Any],
+        *,
+        index: Iterable[IndexValue] | None = None,
+        axis_zero: int = 0,
     ):
         self._values = values
-        self._index = index
+        self._index = index or range(len(values))
         self._axis_zero = axis_zero
 
     def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
