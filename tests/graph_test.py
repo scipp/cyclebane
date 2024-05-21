@@ -564,7 +564,5 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
     b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
-    mapped['b'] = b
-    # TODO
-    assert len(mapped.index_names) == 1
-    assert mapped.indices == 1
+    with pytest.raises(ValueError, match="Conflicting new index names"):
+        mapped['b'] = b

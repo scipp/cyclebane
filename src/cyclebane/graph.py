@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Scipp contributors (https://github.com/scipp)
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections import abc
 from dataclasses import dataclass
 from typing import Any, Generator, Hashable, Iterable, Mapping, Sequence
@@ -258,30 +259,37 @@ class PositionalIndexer:
 MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
 
 
-class ValueArray:
+class ValueArray(ABC):
     """A series of values with an index that can be sliced."""
 
     @staticmethod
     def from_array_like(values: Any, *, axis_zero: int = 0) -> ValueArray:
         if hasattr(values, 'dims'):
             return DataArrayAdapter(values)
-        return NumpyArrayAdapter(values, axis_zero=axis_zero)
+        if values.__class__.__name__ == 'ndarray':
+            return NumpyArrayAdapter(values, axis_zero=axis_zero)
+        return IterableAdapter(values, index=range(len(values)), axis_zero=axis_zero)
 
+    @abstractmethod
     def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
         pass
 
+    @abstractmethod
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
         pass
 
     @property
+    @abstractmethod
     def shape(self) -> tuple[int, ...]:
         pass
 
     @property
+    @abstractmethod
     def index_names(self) -> tuple[IndexName, ...]:
         pass
 
     @property
+    @abstractmethod
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
         pass
 
@@ -381,9 +389,40 @@ class NumpyArrayAdapter(ValueArray):
         return {name: range(size) for name, size in zip(self.index_names, self.shape)}
 
 
-# TODO add adapter class performing the logic of _get_indices, abstracting differences
-# between DataFrame, DataArray, ndarray, ..., such that NodeValues can operate on the
-# adapter class on a common interface
+class IterableAdapter(ValueArray):
+    def __init__(
+        self, values: Sequence[Any], *, index: tuple[IndexValue], axis_zero: int = 0
+    ):
+        self._values = values
+        self._index = index
+        self._axis_zero = axis_zero
+
+    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        if len(key) != 1:
+            raise ValueError('IterableAdapter only supports single index')
+        _, i = key[0]
+        return self._values[self._index.index(i)]
+
+    def __getitem__(
+        self, key: int | slice | tuple[int | slice, ...]
+    ) -> IterableAdapter:
+        return IterableAdapter(
+            self._values[key], index=self._index, axis_zero=self._axis_zero
+        )
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return (len(self._values),)
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        return (f'dim_{self._axis_zero}',)
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return {f'dim_{self._axis_zero}': self._index}
+
+
 class NodeValues(abc.Mapping):
     """A collection of pandas.DataFrame-like objects with distinct indices."""
 
@@ -438,7 +477,7 @@ class NodeValues(abc.Mapping):
             if any([name in self.indices for name in named]):
                 raise ValueError(
                     f'Conflicting new index names {named} with existing '
-                    f'{list(self.indices)}'
+                    f'{tuple(self.indices)}'
                 )
         return NodeValues({**self._values, **value_arrays})
 
@@ -496,12 +535,12 @@ class Graph:
     ):
         self.graph = graph
         self._value_attr = value_attr
-        self._next_node_values = node_values or NodeValues({})
+        self._node_values = node_values or NodeValues({})
 
     def copy(self) -> Graph:
         return Graph(
             self.graph.copy(),
-            node_values=self._next_node_values,
+            node_values=self._node_values,
             value_attr=self._value_attr,
         )
 
@@ -515,7 +554,7 @@ class Graph:
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        return self._next_node_values.indices
+        return self._node_values.indices
 
     def map(self, node_values: MappingToArrayLike) -> Graph:
         """
@@ -533,12 +572,10 @@ class Graph:
             support slicing, e.g., NumPy arrays, Xarray DataArrays, Pandas DataFrames,
             etc.
         """
-        _next_node_values = self._next_node_values.merge_from_mapping(node_values)
+        _node_values = self._node_values.merge_from_mapping(node_values)
         root_nodes = tuple(node_values.keys())
         named = tuple(
-            idx
-            for idx in _next_node_values.indices
-            if idx not in self._next_node_values.indices
+            idx for idx in _node_values.indices if idx not in self._node_values.indices
         )
 
         # Make sure root nodes exist in graph, add them if not. This choice allows for
@@ -553,14 +590,9 @@ class Graph:
         for node in successors:
             name_mapping[node] = node_with_indices(node, named)
 
-        # TODO When removing nodes, e.g., via __getitem__, we should remove also the
-        # node values. We need to make a shallow copy though, or extract columns and
-        # store them individually. As we basically want do to indexing ops on the node
-        # values we should consider using a dedicated class NodeValues to encapsulate
-        # this complexity.
         return Graph(
             nx.relabel_nodes(graph, name_mapping),
-            node_values=_next_node_values,
+            node_values=_node_values,
             value_attr=self.value_attr,
         )
 
@@ -621,9 +653,7 @@ class Graph:
         graph.add_node(name, **attrs)
         graph.add_edge(key, name)
 
-        return Graph(
-            graph, node_values=self._next_node_values, value_attr=self.value_attr
-        )
+        return Graph(graph, node_values=self._node_values, value_attr=self.value_attr)
 
     def _from_orig_key(self, key: Hashable) -> Hashable:
         # Graph.map relabels nodes to include index names, which can be inconvenient
@@ -672,7 +702,7 @@ class Graph:
         graph = nx.relabel_nodes(graph, new_names)
 
         # Get values using previously stored index values
-        for name, col in self._next_node_values.items():
+        for name, col in self._node_values.items():
             for node in graph.nodes:
                 if isinstance(node, NodeName) and node.name == name:
                     graph.nodes[node][self.value_attr] = col.isel(node.index.to_tuple())
@@ -693,10 +723,10 @@ class Graph:
         ancestors.add(key)
         # Drop all node values that are not in the branch
         mapped = set(a.name for a in ancestors if isinstance(a, MappedNode))
-        keep_values = [key for key in self._next_node_values.keys() if key in mapped]
+        keep_values = [key for key in self._node_values.keys() if key in mapped]
         return Graph(
             self.graph.subgraph(ancestors),
-            node_values=self._next_node_values.get_columns(keep_values),
+            node_values=self._node_values.get_columns(keep_values),
             value_attr=self.value_attr,
         )
 
@@ -735,6 +765,5 @@ class Graph:
         graph = nx.compose(graph, new_branch)
 
         # Delay setting graph until we know no step fails
-        # TODO This is not working yet as it should
-        self._next_node_values = self._next_node_values.merge(other._next_node_values)
+        self._node_values = self._node_values.merge(other._node_values)
         self.graph = graph
