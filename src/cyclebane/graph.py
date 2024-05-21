@@ -2,6 +2,7 @@
 # Copyright (c) 2024 Scipp contributors (https://github.com/scipp)
 from __future__ import annotations
 
+from collections import abc
 from dataclasses import dataclass
 from typing import Any, Generator, Hashable, Iterable, Mapping, Sequence
 from uuid import uuid4
@@ -383,11 +384,23 @@ class NumpyArrayAdapter(ValueArray):
 # TODO add adapter class performing the logic of _get_indices, abstracting differences
 # between DataFrame, DataArray, ndarray, ..., such that NodeValues can operate on the
 # adapter class on a common interface
-class NodeValues:
+class NodeValues(abc.Mapping):
     """A collection of pandas.DataFrame-like objects with distinct indices."""
 
     def __init__(self, values: Mapping[Hashable, ValueArray]):
         self._values = values
+
+    def __len__(self) -> int:
+        """Return the number of columns."""
+        return len(self._values)
+
+    def __iter__(self) -> Iterable[Hashable]:
+        """Iterate over the column names."""
+        return iter(self._values)
+
+    def __getitem__(self, key: Hashable) -> ValueArray:
+        """Return the column with the given name."""
+        return self._values[key]
 
     def _to_value_arrays(
         self, values: Mapping[Hashable, Sequence[Any]]
@@ -420,26 +433,14 @@ class NodeValues:
         return self.merge(value_arrays)
 
     def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
-        named = next(iter(value_arrays.values())).index_names
-        if any([name in self.indices for name in named]):
-            raise ValueError(
-                f'Conflicting new index names {named} with existing '
-                f'{list(self.indices)}'
-            )
+        if value_arrays:
+            named = next(iter(value_arrays.values())).index_names
+            if any([name in self.indices for name in named]):
+                raise ValueError(
+                    f'Conflicting new index names {named} with existing '
+                    f'{list(self.indices)}'
+                )
         return NodeValues({**self._values, **value_arrays})
-
-    def keys(self) -> list[Hashable]:
-        return list(self._values)
-
-    def values(self) -> list[ValueArray]:
-        return list(self._values.values())
-
-    def items(self) -> list[tuple[Hashable, ValueArray]]:
-        return list(self._values.items())
-
-    def __getitem__(self, key: Hashable) -> ValueArray:
-        """Select a columns."""
-        return self._values[key]
 
     def get_columns(self, keys: list[Hashable]) -> NodeValues:
         """Select a subset of columns."""
