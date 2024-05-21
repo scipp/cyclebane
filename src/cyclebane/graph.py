@@ -66,21 +66,6 @@ class IndexValues:
             axes=other.axes + self.axes, values=other.values + self.values
         )
 
-    def pop(self, name: IndexName) -> IndexValues:
-        i = self.axes.index(name)
-        return IndexValues(
-            axes=self.axes[:i] + self.axes[i + 1 :],
-            values=self.values[:i] + self.values[i + 1 :],
-        )
-
-    def pop_axis(self, axis: int) -> IndexValues:
-        if axis < 0 or axis >= len(self.axes):
-            raise ValueError('Invalid axis')
-        return IndexValues(
-            axes=self.axes[:axis] + self.axes[axis + 1 :],
-            values=self.values[:axis] + self.values[axis + 1 :],
-        )
-
     def __str__(self):
         return ', '.join(
             f'{name}={value}' for name, value in zip(self.axes, self.values)
@@ -400,6 +385,8 @@ class Graph:
         graph = nx.relabel_nodes(graph, new_names)
 
         # Get values using previously stored index values
+        # TODO We could and should(?) probably use positional indexing here, which would
+        # be faster?
         for node in graph.nodes:
             if (
                 isinstance(node, NodeName)
