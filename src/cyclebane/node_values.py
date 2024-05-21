@@ -151,9 +151,14 @@ class NumpyArrayAdapter(ValueArray):
         index_tuple = tuple(self._indices[k].index(i) for k, i in key)
         return self._array[index_tuple]
 
-    def __getitem__(self, key: int | slice) -> NumpyArrayAdapter:
+    def __getitem__(
+        self, key: int | slice | tuple[int | slice, ...]
+    ) -> NumpyArrayAdapter:
         if isinstance(key, tuple):
             raise NotImplementedError('Cannot select from multi-dim value array')
+        if isinstance(key, int):
+            # This would break current handling of axis naming.
+            raise NotImplementedError('Cannot select single value from value array')
         return NumpyArrayAdapter(
             self._array[key],
             indices={
@@ -197,6 +202,8 @@ class IterableAdapter(ValueArray):
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
     ) -> IterableAdapter:
+        if isinstance(key, tuple) and len(key) > 1:
+            raise ValueError('IterableAdapter is always 1-D')
         return IterableAdapter(
             self._values[key], index=self._index[key], axis_zero=self._axis_zero
         )
@@ -255,7 +262,7 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
     ) -> NodeValues:
         """Append from a mapping of node names to value sequences."""
         for node in node_values:
-            if any(node in mapping for mapping in self._values.keys()):
+            if node in self:
                 raise ValueError(f"Node '{node}' has already been mapped")
         value_arrays = self._to_value_arrays(node_values)
         shapes = [array.shape for array in value_arrays.values()]
