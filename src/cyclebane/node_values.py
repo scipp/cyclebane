@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import abc
-from typing import Any, Hashable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Hashable, Iterable, Mapping, Sequence
+
+if TYPE_CHECKING:
+    import numpy
+    import pandas
+    import scipp
+    import xarray
 
 IndexName = Hashable
 IndexValue = Hashable
@@ -26,10 +32,10 @@ class ValueArray(ABC):
             return DataArrayAdapter(values)
         if values.__class__.__name__ == 'ndarray':
             return NumpyArrayAdapter(values, axis_zero=axis_zero)
-        return IterableAdapter(values, axis_zero=axis_zero)
+        return SequenceAdapter(values, axis_zero=axis_zero)
 
     @abstractmethod
-    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         """Return data by selecting from index with given name and index value."""
 
     @abstractmethod
@@ -53,11 +59,11 @@ class ValueArray(ABC):
 
 
 class PandasSeriesAdapter(ValueArray):
-    def __init__(self, series, *, axis_zero: int = 0):
+    def __init__(self, series: 'pandas.Series', *, axis_zero: int = 0):
         self._series = series
         self._axis_zero = axis_zero
 
-    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
             raise ValueError('PandasSeriesAdapter only supports single index')
         _, i = key[0]
@@ -89,11 +95,11 @@ class PandasSeriesAdapter(ValueArray):
 class DataArrayAdapter(ValueArray):
     def __init__(
         self,
-        data_array,
+        data_array: 'xarray.DataArray | scipp.Variable | scipp.DataArray',
     ):
         self._data_array = data_array
 
-    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         # Note: Eventually we will want to distinguish between dims without coords,
         # where we will use a range index, and dims with coords, where we will use the
         # coord as an index. For now everything is a range index.
@@ -131,7 +137,7 @@ class DataArrayAdapter(ValueArray):
 class NumpyArrayAdapter(ValueArray):
     def __init__(
         self,
-        array,
+        array: 'numpy.ndarray',
         *,
         indices: dict[IndexName, Iterable[IndexValue]] | None = None,
         axis_zero: int = 0,
@@ -147,7 +153,7 @@ class NumpyArrayAdapter(ValueArray):
         self._indices = indices
         self._axis_zero = axis_zero
 
-    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         index_tuple = tuple(self._indices[k].index(i) for k, i in key)
         return self._array[index_tuple]
 
@@ -181,7 +187,7 @@ class NumpyArrayAdapter(ValueArray):
         return self._indices
 
 
-class IterableAdapter(ValueArray):
+class SequenceAdapter(ValueArray):
     def __init__(
         self,
         values: Sequence[Any],
@@ -193,7 +199,7 @@ class IterableAdapter(ValueArray):
         self._index = index or range(len(values))
         self._axis_zero = axis_zero
 
-    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
             raise ValueError('IterableAdapter only supports single index')
         _, i = key[0]
@@ -201,10 +207,10 @@ class IterableAdapter(ValueArray):
 
     def __getitem__(
         self, key: int | slice | tuple[int | slice, ...]
-    ) -> IterableAdapter:
+    ) -> SequenceAdapter:
         if isinstance(key, tuple) and len(key) > 1:
             raise ValueError('IterableAdapter is always 1-D')
-        return IterableAdapter(
+        return SequenceAdapter(
             self._values[key], index=self._index[key], axis_zero=self._axis_zero
         )
 

@@ -49,16 +49,16 @@ class IndexValues:
     Conceptually, this is a mapping from index names to index values.
     """
 
-    axes: tuple[IndexName]
-    values: tuple[IndexValue]
+    axes: tuple[IndexName, ...]
+    values: tuple[IndexValue, ...]
 
     @staticmethod
-    def from_tuple(t: tuple[tuple[IndexName, IndexValue]]) -> IndexValues:
+    def from_tuple(t: tuple[tuple[IndexName, IndexValue], ...]) -> IndexValues:
         names = tuple(name for name, _ in t)
         values = tuple(value for _, value in t)
         return IndexValues(axes=names, values=values)
 
-    def to_tuple(self) -> tuple[tuple[IndexName, IndexValue]]:
+    def to_tuple(self) -> tuple[tuple[IndexName, IndexValue], ...]:
         return tuple(zip(self.axes, self.values))
 
     def merge_index(self, other: IndexValues) -> IndexValues:
@@ -66,12 +66,12 @@ class IndexValues:
             axes=other.axes + self.axes, values=other.values + self.values
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return ', '.join(
             f'{name}={value}' for name, value in zip(self.axes, self.values)
         )
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.axes)
 
 
@@ -85,7 +85,7 @@ class NodeName:
     def merge_index(self, other: IndexValues) -> NodeName:
         return NodeName(name=self.name, index=self.index.merge_index(other))
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'{self.name}({self.index})'
 
 
@@ -105,7 +105,7 @@ def _node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> Mapped
     return MappedNode(name=node, indices=indices)
 
 
-def _node_indices(node: Hashable) -> tuple[int, ...] | None:
+def _node_indices(node: Hashable) -> tuple[IndexName, ...]:
     if isinstance(node, MappedNode):
         return node.indices
     return ()
@@ -127,7 +127,7 @@ def _find_successors(
 
 
 def _rename_successors(
-    graph: nx.DiGraph, *, successors: set[Hashable], index: IndexValues
+    graph: nx.DiGraph, *, successors: Iterable[Hashable], index: IndexValues
 ) -> nx.DiGraph:
     """Replace 'node' and all its successors with (node, suffix), and update all edges
     accordingly."""
@@ -225,7 +225,7 @@ class Graph:
         return Graph(self.graph.copy(), node_values=self._node_values)
 
     @property
-    def index_names(self) -> tuple[IndexName]:
+    def index_names(self) -> tuple[IndexName, ...]:
         """Names of the indices (dimensions) of the graph."""
         return tuple(self.indices)
 
@@ -272,11 +272,11 @@ class Graph:
 
     def reduce(
         self,
-        key: None | str = None,
+        key: None | Hashable = None,
         *,
         index: None | Hashable = None,
         axis: None | int = None,
-        name: None | str = None,
+        name: None | Hashable = None,
         attrs: None | dict[str, Any] = None,
     ) -> Graph:
         """
@@ -306,7 +306,7 @@ class Graph:
         if index is not None and axis is not None:
             raise ValueError('Only one of index and axis can be given')
         key = self._from_orig_key(key)
-        indices: tuple[IndexName] = _node_indices(key)
+        indices = _node_indices(key)
         if index is not None and index not in indices:
             raise ValueError(f"Node '{key}' does not have index '{index}'.")
         # TODO We can support indexing from the back in the future.
@@ -380,7 +380,7 @@ class Graph:
         new_names = {
             node: NodeName(node.name.name, node.index)
             for node in graph
-            if isinstance(node, NodeName)
+            if isinstance(node, NodeName) and isinstance(node.name, MappedNode)
         }
         graph = nx.relabel_nodes(graph, new_names)
 
@@ -425,6 +425,8 @@ class Graph:
         edges to successors of the old branch are connected to the sink of the new
         branch.
         """
+        if isinstance(branch, slice):
+            raise NotImplementedError('Setting slice not supported yet.')
         if not isinstance(other, Graph):
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
