@@ -3,19 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generator, Hashable, Iterable, Mapping, Sequence
+from typing import Any, Generator, Hashable, Iterable
 from uuid import uuid4
 
 import networkx as nx
 
 from .node_values import IndexName, IndexValue, NodeValues
-
-
-def _is_pandas_series_or_dataframe(obj: Any) -> bool:
-    return str(type(obj)) in [
-        "<class 'pandas.core.frame.DataFrame'>",
-        "<class 'pandas.core.series.Series'>",
-    ]
 
 
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
@@ -164,40 +157,6 @@ def _rename_successors(
     return nx.relabel_nodes(graph, renamed_nodes, copy=True)
 
 
-def _get_indices(
-    node_values: Mapping[Hashable, Sequence[Any]]
-) -> list[tuple[IndexName, Iterable[IndexValue]]]:
-    col_values = _get_col_values(node_values)
-    # We do not descend into nested lists, users should use, e.g., NumPy if
-    # they want to do that.
-    shapes = [getattr(col, 'shape', (len(col),)) for col in col_values]
-    if len(set(shapes)) != 1:
-        raise ValueError(
-            'All value sequences in a map operation must have the same shape. '
-            'Use multiple map operations if necessary.'
-        )
-    shape = shapes[0]
-
-    # TODO Catch cases where different items have different indices?
-    values = next(iter(col_values))
-    if (dims := getattr(values, 'dims', None)) is not None:
-        # Note that we are currently not attempting to use Xarray or Scipp coords
-        # as indices.
-        sizes = dict(zip(dims, values.shape))
-        return [(dim, range(sizes[dim])) for dim in dims]
-    if _is_pandas_series_or_dataframe(values):
-        # TODO There can be multiple names in Pandas?
-        return [(values.index.name, values.index)]
-    else:
-        return [(None, range(size)) for size in shape]
-
-
-def _get_col_values(values: Mapping[Hashable, Sequence[Any]]) -> list[Sequence[Any]]:
-    if (columns := getattr(values, 'columns', None)) is not None:
-        return [values.iloc[:, i] for i in range(len(columns))]
-    return list(values.values())
-
-
 def _yield_index(
     indices: list[tuple[IndexName, Iterable[IndexValue]]]
 ) -> Generator[tuple[tuple[IndexName, IndexValue], ...], None, None]:
@@ -218,39 +177,16 @@ class PositionalIndexer:
 
     def __getitem__(self, key: int | slice) -> Graph:
         if isinstance(key, int):
-            raise ValueError('Only slices are supported')
-        start, stop, step = key.start, key.stop, key.step
-        out = Graph(self.graph.graph)
-
-        def slice_index(
-            name: IndexName, index: Iterable[IndexValue]
-        ) -> Iterable[IndexValue]:
-            if name != self.index_name:
-                return index
-            return index[start:stop:step]
-
-        def slice_values(
-            index_names: tuple[IndexName, ...], values: MappingToArrayLike
-        ) -> MappingToArrayLike:
-            if self.index_name not in index_names:
-                return values
-            return {
-                name: col[start:stop:step] if name == self.index_name else col
-                for name, col in values.items()
+            raise NotImplementedError('Only slices are supported')
+        node_values = NodeValues(
+            {
+                name: col[key] if self.index_name in col.index_names else col
+                for name, col in self.graph._node_values.items()
             }
-
-        # TODO all broken here?
-        # TODO having to slice indices and values independently shows design problem.
-        # Why can't we just keep, e.g., the DataFrames and op on those?
-        # Can Graph.indices be computed dynamically?
-        out.indices = {
-            name: slice_index(name, index) for name, index in self.graph.indices.items()
-        }
-        out._node_values = {
-            index_names: slice_values(index_names, values)
-            for index_names, values in self.graph._node_values.items()
-        }
-        return out
+        )
+        return Graph(
+            self.graph.graph, node_values=node_values, value_attr=self.graph.value_attr
+        )
 
 
 MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
@@ -467,7 +403,7 @@ class Graph:
         for name, col in self._node_values.items():
             for node in graph.nodes:
                 if isinstance(node, NodeName) and node.name == name:
-                    graph.nodes[node][self.value_attr] = col.isel(node.index.to_tuple())
+                    graph.nodes[node][self.value_attr] = col.sel(node.index.to_tuple())
 
         return graph
 

@@ -122,7 +122,7 @@ def test_chained_map_over_list() -> None:
     assert x_values == [4, 5]
 
 
-def test_map_does_not_descent_into_nested_lists() -> None:
+def test_map_does_not_descend_into_nested_lists() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
@@ -566,3 +566,17 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
     b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
     with pytest.raises(ValueError, match="Conflicting new index names"):
         mapped['b'] = b
+
+
+def test_slice_by_position() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    sliced = mapped.by_position('dim_0')[1:3]
+    result = sliced.to_networkx()
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values == [2, 3]

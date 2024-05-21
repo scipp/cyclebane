@@ -11,7 +11,7 @@ IndexValue = Hashable
 
 
 class ValueArray(ABC):
-    """A series of values with an index that can be sliced."""
+    """Abstract base class for a series of values with an index that can be sliced."""
 
     @staticmethod
     def from_array_like(values: Any, *, axis_zero: int = 0) -> ValueArray:
@@ -22,8 +22,8 @@ class ValueArray(ABC):
         return IterableAdapter(values, index=range(len(values)), axis_zero=axis_zero)
 
     @abstractmethod
-    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
-        pass
+    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+        """Return data by selecting from index with given name and index value."""
 
     @abstractmethod
     def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
@@ -50,7 +50,7 @@ class PandasSeriesAdapter(ValueArray):
         self._series = series
         self._axis_zero = axis_zero
 
-    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
         if len(key) != 1:
             raise ValueError('PandasSeriesAdapter only supports single index')
         _, i = key[0]
@@ -83,7 +83,7 @@ class DataArrayAdapter(ValueArray):
     def __init__(self, data_array):
         self._data_array = data_array
 
-    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
         if hasattr(self._data_array, 'isel'):
             return self._data_array.isel(dict(key))
         values = self._data_array
@@ -118,7 +118,7 @@ class NumpyArrayAdapter(ValueArray):
         self._array = np.asarray(array)
         self._axis_zero = axis_zero
 
-    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
         return self._array[tuple(i for _, i in key)]
 
     def __getitem__(
@@ -142,13 +142,13 @@ class NumpyArrayAdapter(ValueArray):
 
 class IterableAdapter(ValueArray):
     def __init__(
-        self, values: Sequence[Any], *, index: tuple[IndexValue], axis_zero: int = 0
+        self, values: Sequence[Any], *, index: Iterable[IndexValue], axis_zero: int = 0
     ):
         self._values = values
         self._index = index
         self._axis_zero = axis_zero
 
-    def isel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
+    def sel(self, key: list[tuple[IndexName, IndexValue]]) -> Any:
         if len(key) != 1:
             raise ValueError('IterableAdapter only supports single index')
         _, i = key[0]
@@ -158,7 +158,7 @@ class IterableAdapter(ValueArray):
         self, key: int | slice | tuple[int | slice, ...]
     ) -> IterableAdapter:
         return IterableAdapter(
-            self._values[key], index=self._index, axis_zero=self._axis_zero
+            self._values[key], index=self._index[key], axis_zero=self._axis_zero
         )
 
     @property
@@ -174,7 +174,7 @@ class IterableAdapter(ValueArray):
         return {f'dim_{self._axis_zero}': self._index}
 
 
-class NodeValues(abc.Mapping):
+class NodeValues(abc.Mapping[Hashable, ValueArray]):
     """A collection of pandas.DataFrame-like objects with distinct indices."""
 
     def __init__(self, values: Mapping[Hashable, ValueArray]):
