@@ -400,10 +400,12 @@ class Graph:
         graph = nx.relabel_nodes(graph, new_names)
 
         # Get values using previously stored index values
-        for name, col in self._node_values.items():
-            for node in graph.nodes:
-                if isinstance(node, NodeName) and node.name == name:
-                    graph.nodes[node][value_attr] = col.sel(node.index.to_tuple())
+        for node in graph.nodes:
+            if (
+                isinstance(node, NodeName)
+                and (node_values := self._node_values.get(node.name)) is not None
+            ):
+                graph.nodes[node][value_attr] = node_values.sel(node.index.to_tuple())
 
         return graph
 
