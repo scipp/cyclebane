@@ -11,7 +11,14 @@ IndexValue = Hashable
 
 
 class ValueArray(ABC):
-    """Abstract base class for a series of values with an index that can be sliced."""
+    """
+    Abstract base class for a series of values with an index that can be sliced.
+
+    Used by :py:class:`NodeValues` to store the values of a given node in a graph. The
+    abstraction allows for the use of different data structures to store the values of
+    nodes in a graph, such as pandas.DataFrame, xarray.DataArray, numpy.ndarray, or
+    simple Python iterables.
+    """
 
     @staticmethod
     def from_array_like(values: Any, *, axis_zero: int = 0) -> ValueArray:
@@ -202,7 +209,11 @@ class IterableAdapter(ValueArray):
 
 
 class NodeValues(abc.Mapping[Hashable, ValueArray]):
-    """A collection of pandas.DataFrame-like objects with distinct indices."""
+    """
+    A collection of pandas.DataFrame-like objects with distinct indices.
+
+    This is used by :py:class:`Graph` to store the values of nodes in a graph.
+    """
 
     def __init__(self, values: Mapping[Hashable, ValueArray]):
         self._values = values

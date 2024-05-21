@@ -114,13 +114,13 @@ class MappedNode:
     indices: tuple[IndexName, ...]
 
 
-def node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> MappedNode:
+def _node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> MappedNode:
     if isinstance(node, MappedNode):
         return MappedNode(name=node.name, indices=indices + node.indices)
     return MappedNode(name=node, indices=indices)
 
 
-def node_indices(node: Hashable) -> tuple[int, ...] | None:
+def _node_indices(node: Hashable) -> tuple[int, ...] | None:
     if isinstance(node, MappedNode):
         return node.indices
     return ()
@@ -171,6 +171,10 @@ def _yield_index(
 
 
 class PositionalIndexer:
+    """
+    Helper class to allow slicing a named dim of a graph using positional indexing.
+    """
+
     def __init__(self, graph: Graph, index_name: IndexName):
         self.graph = graph
         self.index_name = index_name
@@ -209,19 +213,13 @@ class Graph:
 
     Notes
     -----
-    The current implementation is a proof of concept, there is a number of things to
+    The current implementation is not complete, there is a number of things to
     improve:
     - Overall, I would like to reduce the array-handling code and transparently forward
       to the slicing code of the underlying array-like object (Pandas, NumPy, Xarray,
       Scipp). Basically, we would like to use the slicing methods of the underlying
       object. This may not be trivial, since we might mix different types of array-like
       objects at nodes with multiple predecessors.
-    - We could avoid the `indices` attribute on nodes (added by `map`). Instead, lookup
-      the ancestors and identify mapped source nodes. This will simplify slicing, as
-      it avoids the need to remove indices on nodes (we only slice the values arrays).
-      `reduce` would need to add an attribute on which dim to reduce though, so this
-      may not actually be easier. It might solve the problem of selecting branches
-      though, which also needs to select a subset of the mapped arrays.
     """
 
     def __init__(
@@ -286,7 +284,7 @@ class Graph:
         successors = _find_successors(graph, root_nodes=root_nodes)
         name_mapping: dict[Hashable, MappedNode] = {}
         for node in successors:
-            name_mapping[node] = node_with_indices(node, named)
+            name_mapping[node] = _node_with_indices(node, named)
 
         return Graph(
             nx.relabel_nodes(graph, name_mapping),
@@ -330,7 +328,7 @@ class Graph:
         if index is not None and axis is not None:
             raise ValueError('Only one of index and axis can be given')
         key = self._from_orig_key(key)
-        indices: tuple[IndexName] = node_indices(key)
+        indices: tuple[IndexName] = _node_indices(key)
         if index is not None and index not in indices:
             raise ValueError(f"Node '{key}' does not have index '{index}'.")
         # TODO We can support indexing from the back in the future.
@@ -379,7 +377,7 @@ class Graph:
             # Find all nodes with this index
             nodes = []
             for node in graph.nodes():
-                if index_name in node_indices(
+                if index_name in _node_indices(
                     node.name if isinstance(node, NodeName) else node
                 ):
                     nodes.append(node)
