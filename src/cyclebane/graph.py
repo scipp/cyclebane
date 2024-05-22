@@ -41,7 +41,7 @@ def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
     return graph
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IndexValues:
     """
     Index values used as part of :py:class:`NodeName`.
@@ -75,7 +75,7 @@ class IndexValues:
         return len(self.axes)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NodeName:
     """Node name with indices used for mapped nodes when converting to NetworkX."""
 
@@ -89,7 +89,7 @@ class NodeName:
         return f'{self.name}({self.index})'
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MappedNode:
     """
     Key for a node in :py:class:`Graph` representing a collection of "mapped" nodes.
