@@ -569,6 +569,19 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
         mapped['b'] = b
 
 
+def test_setitem_currently_does_not_allow_compatible_indices() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3], 'b': [11, 12, 13]})
+    # Note: This is a limitation of the current implementation. We could check if the
+    # indices are identical and allow this. For simplicity we currently do not.
+    with pytest.raises(ValueError, match="Conflicting new index names"):
+        mapped['b'] = mapped['a']
+
+
 @pytest.mark.parametrize(
     'param_table',
     [{'a': [1, 2, 3]}, {'a': np.array([1, 2, 3])}, pd.DataFrame({'a': [1, 2, 3]})],
