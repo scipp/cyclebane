@@ -201,7 +201,7 @@ class SequenceAdapter(ValueArray):
 
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
-            raise ValueError('IterableAdapter only supports single index')
+            raise ValueError('SequenceAdapter only supports single index')
         _, i = key[0]
         return self._values[self._index.index(i)]
 
@@ -209,7 +209,7 @@ class SequenceAdapter(ValueArray):
         self, key: int | slice | tuple[int | slice, ...]
     ) -> SequenceAdapter:
         if isinstance(key, tuple) and len(key) > 1:
-            raise ValueError('IterableAdapter is always 1-D')
+            raise ValueError('SequenceAdapter is always 1-D')
         return SequenceAdapter(
             self._values[key], index=self._index[key], axis_zero=self._axis_zero
         )
@@ -271,8 +271,8 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
             if node in self:
                 raise ValueError(f"Node '{node}' has already been mapped")
         value_arrays = self._to_value_arrays(node_values)
-        shapes = [array.shape for array in value_arrays.values()]
-        if len(set(shapes)) != 1:
+        shapes = {array.shape for array in value_arrays.values()}
+        if len(shapes) != 1:
             raise ValueError(
                 'All value sequences in a map operation must have the same shape. '
                 'Use multiple map operations if necessary.'
