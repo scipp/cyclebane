@@ -66,7 +66,12 @@ class PandasSeriesAdapter(ValueArray):
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
             raise ValueError('PandasSeriesAdapter only supports single index')
-        _, i = key[0]
+        index_name, i = key[0]
+        if index_name != self.index_names[0]:
+            raise ValueError(
+                f'Unexpected index name {index_name} for PandasSeriesAdapter with '
+                f'index names {self.index_names}'
+            )
         return self._series.loc[i]
 
     def __getitem__(
@@ -80,16 +85,16 @@ class PandasSeriesAdapter(ValueArray):
 
     @property
     def index_names(self) -> tuple[IndexName, ...]:
-        return tuple(self.indices)
-
-    @property
-    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        name = (
+        index_name = (
             self._series.index.name
             if self._series.index.name is not None
             else f'dim_{self._axis_zero}'
         )
-        return {name: self._series.index}
+        return (index_name,)
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return {self.index_names[0]: self._series.index}
 
 
 class DataArrayAdapter(ValueArray):
