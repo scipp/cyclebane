@@ -367,9 +367,9 @@ class Graph:
             # Make a copy for each index value
             graphs = [
                 _rename_successors(
-                    graph, successors=nodes, index=IndexValues.from_tuple(index)
+                    graph, successors=nodes, index=IndexValues.from_tuple(i)
                 )
-                for index in _yield_index([(index_name, index)])
+                for i in _yield_index([(index_name, index)])
             ]
             graph = nx.compose_all(graphs)
         # Replace all MappingNodes with their name
