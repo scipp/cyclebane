@@ -264,8 +264,8 @@ def test_map_scipp_variable_uses_dims_as_index_names() -> None:
     result = mapped.to_networkx()
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == list(x)
+    a_values = sc.concat([data['value'] for data in a_data], 'x')
+    assert sc.identical(a_values.data, x)
 
 
 def test_map_2d_scipp_variable_uses_dims_as_index_names() -> None:
@@ -279,9 +279,70 @@ def test_map_2d_scipp_variable_uses_dims_as_index_names() -> None:
     result = mapped.to_networkx()
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values[0:3] == list(values['x', 0])
-    assert a_values[3:6] == list(values['x', 1])
+    a_values = sc.concat([data['value'] for data in a_data], 'y')
+    assert sc.identical(a_values[0:3].data, values['x', 0])
+    assert sc.identical(a_values[3:6].data, values['x', 1])
+
+
+def test_map_scipp_data_array_uses_coord_as_indices_if_present() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    values = sc.array(dims=['x', 'y'], values=[[1, 2, 3], [4, 5, 6]], unit='m')
+    da = sc.DataArray(
+        values, coords={'y': sc.linspace(dim='y', start=0, stop=1, num=3, unit='mm')}
+    )
+    mapped = graph.map({'a': da})
+    assert mapped.index_names == ('x', 'y')
+    result = mapped.to_networkx()
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = sc.concat([data['value'] for data in a_data], 'y')
+    del a_values.coords['x']  # auto range index not in reference
+    assert sc.identical(a_values[0:3], da['x', 0])
+    assert sc.identical(a_values[3:6], da['x', 1])
+
+    def idx(name: str, i0: int, i1: float) -> cb.graph.NodeName:
+        return cb.graph.NodeName(name, cb.graph.IndexValues(('x', 'y'), (i0, i1)))
+
+    for name in ['a', 'b']:
+        # Note that due to current shortcomings in scipp the indices are tuples of the
+        # form (value, unit) and not the corresponding 0-D scipp.Variable.
+        assert idx(name, 0, (0.0, 'mm')) in result
+        assert idx(name, 0, (0.5, 'mm')) in result
+        assert idx(name, 0, (1.0, 'mm')) in result
+        assert idx(name, 1, (0.0, 'mm')) in result
+        assert idx(name, 1, (0.5, 'mm')) in result
+        assert idx(name, 1, (1.0, 'mm')) in result
+
+
+def test_map_xarray_data_array_uses_coord_as_indices_if_present() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    da = xr.DataArray(
+        dims=('x', 'y'),
+        data=np.array([[1, 2, 3], [4, 5, 6]]),
+        coords={'y': np.linspace(start=0, stop=1, num=3)},
+    )
+    mapped = graph.map({'a': da})
+    assert mapped.index_names == ('x', 'y')
+    result = mapped.to_networkx()
+
+    def idx(name: str, i0: int, i1: float) -> cb.graph.NodeName:
+        return cb.graph.NodeName(name, cb.graph.IndexValues(('x', 'y'), (i0, i1)))
+
+    for name in ['a', 'b']:
+        # Note that due to current shortcomings in scipp the indices are tuples of the
+        # form (value, unit) and not the corresponding 0-D scipp.Variable.
+        assert idx(name, 0, 0.0) in result
+        assert idx(name, 0, 0.5) in result
+        assert idx(name, 0, 1.0) in result
+        assert idx(name, 1, 0.0) in result
+        assert idx(name, 1, 0.5) in result
+        assert idx(name, 1, 1.0) in result
 
 
 def test_reduce_scipp_mapped() -> None:
@@ -708,6 +769,67 @@ def test_slice_by_position(param_table: Mapping[Hashable, Sequence[int]]) -> Non
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values == [2, 3]
+
+
+@pytest.mark.parametrize(
+    'values',
+    [
+        np.array([[1, 2, 3], [4, 5, 6]]),
+        xr.DataArray(dims=('dim_0', 'dim_1'), data=[[1, 2, 3], [4, 5, 6]]),
+    ],
+)
+def test_by_position_2d_slice_outer(values) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': values})
+    sliced = mapped.by_position('dim_0')[1:]
+    result = sliced.to_networkx()
+
+    def idx(i0: int, i1: int) -> cb.graph.NodeName:
+        return cb.graph.NodeName(
+            'a', cb.graph.IndexValues(('dim_0', 'dim_1'), (i0, i1))
+        )
+
+    print(list(result.nodes))
+    assert idx(0, 0) not in result
+    assert idx(0, 1) not in result
+    assert idx(0, 2) not in result
+    assert idx(1, 0) in result
+    assert idx(1, 1) in result
+    assert idx(1, 2) in result
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values[0:3] == [4, 5, 6]
+
+
+def test_by_position_2d_slice_inner() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': np.array([[1, 2, 3], [4, 5, 6]])})
+    sliced = mapped.by_position('dim_1')[:2]
+    result = sliced.to_networkx()
+
+    def idx(i0: int, i1: int) -> cb.graph.NodeName:
+        return cb.graph.NodeName(
+            'a', cb.graph.IndexValues(('dim_0', 'dim_1'), (i0, i1))
+        )
+
+    assert idx(0, 0) in result
+    assert idx(0, 1) in result
+    assert idx(0, 2) not in result
+    assert idx(1, 0) in result
+    assert idx(1, 1) in result
+    assert idx(1, 2) not in result
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values[0:2] == [1, 2]
+    assert a_values[2:4] == [4, 5]
 
 
 def test_node_attrs_are_preserved() -> None:

@@ -161,11 +161,17 @@ class PositionalIndexer:
         self.index_name = index_name
 
     def __getitem__(self, key: int | slice) -> Graph:
+        # Supporting single indices may be conceptually ill-defined if the index
+        # `reduce` was applied to the graph, so we might never support this.
         if isinstance(key, int):
             raise NotImplementedError('Only slices are supported')
         node_values = NodeValues(
             {
-                name: col[key] if self.index_name in col.index_names else col
+                name: (
+                    col.loc({self.index_name: key})
+                    if self.index_name in col.index_names
+                    else col
+                )
                 for name, col in self.graph._node_values.items()
             }
         )

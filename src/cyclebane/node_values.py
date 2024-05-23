@@ -50,8 +50,17 @@ class ValueArray(ABC):
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         """Return data by selecting from index with given name and index value."""
 
+    def loc(self, key: dict[IndexName, slice]) -> ValueArray:
+        if not all(isinstance(i, slice) for i in key.values()):
+            raise ValueError('ValueArray.loc only accepts slices, not integers')
+        if not set(key).issubset(set(self.index_names)):
+            raise ValueError(
+                f'ValueArray.loc got {key.keys()}, not a subset of {self.index_names}'
+            )
+        return self[key]
+
     @abstractmethod
-    def __getitem__(self, key: int | slice | tuple[int | slice, ...]) -> ValueArray:
+    def __getitem__(self, key: dict[IndexName, slice]) -> ValueArray:
         pass
 
     @property
@@ -92,13 +101,10 @@ class SequenceAdapter(ValueArray):
         _, i = key[0]
         return self._values[self._index.index(i)]
 
-    def __getitem__(
-        self, key: int | slice | tuple[int | slice, ...]
-    ) -> SequenceAdapter:
-        if isinstance(key, tuple) and len(key) > 1:
-            raise ValueError('SequenceAdapter is always 1-D')
+    def __getitem__(self, key: dict[IndexName, slice]) -> SequenceAdapter:
+        _, i = next(iter(key.items()))
         return SequenceAdapter(
-            self._values[key], index=self._index[key], axis_zero=self._axis_zero
+            self._values[i], index=self._index[i], axis_zero=self._axis_zero
         )
 
     @property
@@ -139,10 +145,9 @@ class PandasSeriesAdapter(ValueArray):
             )
         return self._series.loc[i]
 
-    def __getitem__(
-        self, key: int | slice | tuple[int | slice, ...]
-    ) -> PandasSeriesAdapter:
-        return PandasSeriesAdapter(self._series[key], axis_zero=self._axis_zero)
+    def __getitem__(self, key: dict[IndexName, slice]) -> PandasSeriesAdapter:
+        _, i = next(iter(key.items()))
+        return PandasSeriesAdapter(self._series[i], axis_zero=self._axis_zero)
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -162,53 +167,33 @@ class PandasSeriesAdapter(ValueArray):
         return {self.index_names[0]: self._series.index}
 
 
-class DataArrayAdapter(ValueArray):
+class XarrayDataArrayAdapter(ValueArray):
     def __init__(
         self,
-        data_array: 'xarray.DataArray | scipp.Variable | scipp.DataArray',
+        data_array: 'xarray.DataArray',
     ):
-        self._data_array = data_array
+        default_indices = {
+            dim: range(size)
+            for dim, size in data_array.sizes.items()
+            if dim not in data_array.coords
+        }
+        self._data_array = data_array.assign_coords(default_indices)
 
     @staticmethod
-    def try_from(obj: Any, *, axis_zero: int = 0) -> DataArrayAdapter | None:
+    def try_from(obj: Any, *, axis_zero: int = 0) -> XarrayDataArrayAdapter | None:
         try:
             import xarray
 
             if isinstance(obj, xarray.DataArray):
-                return DataArrayAdapter(obj)
-        except ModuleNotFoundError:
-            pass
-        try:
-            import scipp
-
-            if isinstance(obj, (scipp.Variable, scipp.DataArray)):
-                return DataArrayAdapter(obj)
+                return XarrayDataArrayAdapter(obj)
         except ModuleNotFoundError:
             pass
 
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
-        # Note: Eventually we will want to distinguish between dims without coords,
-        # where we will use a range index, and dims with coords, where we will use the
-        # coord as an index. For now everything is a range index.
-        # We use isel instead of sel, since we default to range indices for now.
-        if hasattr(self._data_array, 'isel'):
-            return self._data_array.isel(dict(key))
-        values = self._data_array
-        for label, i in key:
-            # This is Scipp notation, Xarray uses the 'isel' method. Scipp indexing
-            # uses a comma to separate dimension label from the index, unlike Numpy
-            # and other libraries where it separates the indices for different axes.
-            values = values[label, i]
-        return values
+        return self._data_array.sel(dict(key))
 
-    def __getitem__(
-        self, key: int | slice | tuple[int | slice, ...]
-    ) -> DataArrayAdapter:
-        # We have not implemented slicing that correctly handles the range-index setup
-        # in, e.g., self.indices. This is a placeholder implementation.
-        raise NotImplementedError('DataArrayAdapter does not support slicing')
-        # If we insert range indices as coords, this implementation will work.
-        return DataArrayAdapter(self._data_array[key])
+    def __getitem__(self, key: dict[IndexName, slice]) -> XarrayDataArrayAdapter:
+        return XarrayDataArrayAdapter(self._data_array.isel(key))
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -220,7 +205,79 @@ class DataArrayAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        return {name: range(size) for name, size in zip(self.index_names, self.shape)}
+        return {
+            dim: self._data_array.coords[dim].values for dim in self._data_array.dims
+        }
+
+
+class ScippDataArrayAdapter(ValueArray):
+    def __init__(self, data_array: 'scipp.DataArray'):
+        import scipp
+
+        default_indices = {
+            dim: scipp.arange(dim, size, unit=None)
+            for dim, size in data_array.sizes.items()
+            if dim not in data_array.coords
+        }
+        self._data_array = data_array.assign_coords(default_indices)
+
+    @staticmethod
+    def try_from(obj: Any, *, axis_zero: int = 0) -> ScippDataArrayAdapter | None:
+        try:
+            import scipp
+
+            if isinstance(obj, scipp.Variable):
+                return ScippDataArrayAdapter(scipp.DataArray(obj))
+            if isinstance(obj, scipp.DataArray):
+                return ScippDataArrayAdapter(obj)
+        except ModuleNotFoundError:
+            pass
+
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
+        import scipp
+
+        values = self._data_array
+        for dim, value in key:
+            # Reconstruct label, to use label-based indexing instead of positional
+            if isinstance(value, tuple):
+                value, unit = value
+            else:
+                unit = None
+            label = scipp.scalar(value, unit=unit)
+            # Scipp indexing uses a comma to separate dimension label from the index,
+            # unlike Numpy and other libraries where it separates the indices for
+            # different axes.
+            values = values[dim, label]
+        return values
+
+    def __getitem__(self, key: dict[IndexName, slice]) -> ScippDataArrayAdapter:
+        values = self._data_array
+        for dim, i in key:
+            values = values[dim, i]
+        return ScippDataArrayAdapter(values)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self._data_array.shape
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        return tuple(self._data_array.dims)
+
+    def _index_for_dim(self, dim: str) -> list[tuple[Any, 'scipp.Unit']]:
+        # Work around some NetworkX errors. Probably scipp.Variable lacks functionality.
+        # For now we return a list of tuples, where the first element is the value and
+        # the second is the unit.
+        coord = self._data_array.coords[dim]
+        unit = coord.unit
+        if unit is None:
+            return coord.values
+        unit = str(unit)
+        return [(value, unit) for value in coord.values]
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return {dim: self._index_for_dim(dim) for dim in self._data_array.dims}
 
 
 class NumpyArrayAdapter(ValueArray):
@@ -255,18 +312,11 @@ class NumpyArrayAdapter(ValueArray):
         index_tuple = tuple(self._indices[k].index(i) for k, i in key)
         return self._array[index_tuple]
 
-    def __getitem__(
-        self, key: int | slice | tuple[int | slice, ...]
-    ) -> NumpyArrayAdapter:
-        if isinstance(key, tuple):
-            raise NotImplementedError('Cannot select from multi-dim value array')
-        if isinstance(key, int):
-            # This would break current handling of axis naming.
-            raise NotImplementedError('Cannot select single value from value array')
+    def __getitem__(self, key: dict[IndexName, slice]) -> NumpyArrayAdapter:
         return NumpyArrayAdapter(
-            self._array[key],
+            self._array[tuple(key.get(k, slice(None)) for k in self._indices)],
             indices={
-                index_name: index_values[key]
+                index_name: (index_values[key.get(index_name, slice(None))])
                 for index_name, index_values in self._indices.items()
             },
             axis_zero=self._axis_zero,
@@ -278,7 +328,7 @@ class NumpyArrayAdapter(ValueArray):
 
     @property
     def index_names(self) -> tuple[IndexName, ...]:
-        return tuple(f'dim_{i+self._axis_zero}' for i in range(self._array.ndim))
+        return tuple(self._indices)
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
