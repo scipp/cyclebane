@@ -424,6 +424,8 @@ class Graph:
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
+        # In the future, we could support this if BOTH sink and branch are MappedNodes
+        # with identical indices.
         if isinstance(sink, MappedNode) or isinstance(branch, MappedNode):
             raise NotImplementedError('Mapped nodes not supported yet in __setitem__')
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
