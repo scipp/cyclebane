@@ -113,8 +113,10 @@ class DataArrayAdapter(ValueArray):
             return self._data_array.isel(dict(key))
         values = self._data_array
         for label, i in key:
-            # This is Scipp notation, Xarray uses the 'isel' method.
-            values = values[(label, i)]
+            # This is Scipp notation, Xarray uses the 'isel' method. Scipp indexing
+            # uses a comma to separate dimension label from the index, unlike Numpy
+            # and other libraries where it separates the indices for different axes.
+            values = values[label, i]
         return values
 
     def __getitem__(
