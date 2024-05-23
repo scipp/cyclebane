@@ -708,3 +708,72 @@ def test_slice_by_position(param_table: Mapping[Hashable, Sequence[int]]) -> Non
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
     assert a_values == [2, 3]
+
+
+def test_node_attrs_are_preserved() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.nodes['a']['attr'] = 1
+
+    graph = cb.Graph(g)
+    result = graph.to_networkx()
+    assert result.nodes['a'] == {'attr': 1}
+
+
+def test_node_attrs_are_preserved_in_getitem() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['attr1'] = 1
+    g.nodes['b']['attr2'] = 2
+    g.nodes['c']['attr3'] = 3
+
+    graph = cb.Graph(g)
+    result = graph['c'].to_networkx()
+    assert result.nodes['a'] == {'attr1': 1}
+    assert result.nodes['b'] == {'attr2': 2}
+
+
+def test_node_attrs_are_preserved_in_setitem() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'c')
+    g1.add_edge('b', 'c')
+    g1.nodes['a']['attr1'] = 1
+    g1.nodes['b']['attr2'] = 2
+    g1.nodes['c']['attr3'] = 3
+
+    graph = cb.Graph(g1)
+    g2 = nx.DiGraph()
+    g2.add_edge('x', 'b')
+    g2.nodes['x']['attr4'] = 4
+    g2.nodes['b']['attr5'] = 5
+
+    graph['b'] = cb.Graph(g2)
+
+    result = graph.to_networkx()
+    assert result.nodes['a'] == {'attr1': 1}
+    assert result.nodes['b'] == {'attr5': 5}  # b was replaced
+    assert result.nodes['c'] == {'attr3': 3}
+    assert result.nodes['x'] == {'attr4': 4}
+
+
+def test_node_attrs_are_preserved_in_map() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.nodes['a']['attr'] = 11
+    g.nodes['b']['attr'] = 22
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    value_attr = 'myvalue'
+    result = mapped.to_networkx(value_attr=value_attr)
+
+    def idx(name: str, i: int) -> cb.graph.NodeName:
+        return cb.graph.NodeName(name, cb.graph.IndexValues(('dim_0',), (i,)))
+
+    assert result.nodes[idx('a', 0)] == {'attr': 11, 'myvalue': 1}
+    assert result.nodes[idx('a', 1)] == {'attr': 11, 'myvalue': 2}
+    assert result.nodes[idx('a', 2)] == {'attr': 11, 'myvalue': 3}
+    assert result.nodes[idx('b', 0)] == {'attr': 22}
+    assert result.nodes[idx('b', 1)] == {'attr': 22}
+    assert result.nodes[idx('b', 2)] == {'attr': 22}
