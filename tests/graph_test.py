@@ -629,6 +629,19 @@ def test_getitem_on_mapped_graph_with_base_node_name_returns_mapped_node() -> No
     assert len(result.nodes) == 6
 
 
+def test_setitem_with_mapped_sink_node_raises_if_target_is_not_mapped() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
+    with pytest.raises(
+        NotImplementedError, match="Mapped nodes not supported yet in __setitem__"
+    ):
+        graph['b'] = b
+
+
 def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
@@ -636,9 +649,9 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
-    b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
+    d = cb.Graph(nx.DiGraph()).map({'b': [11, 12]}).reduce('b', name='d')
     with pytest.raises(ValueError, match="Conflicting new index names"):
-        mapped['b'] = b
+        mapped['x'] = d
 
 
 def test_setitem_currently_does_not_allow_compatible_indices() -> None:
@@ -647,11 +660,33 @@ def test_setitem_currently_does_not_allow_compatible_indices() -> None:
     g.add_edge('b', 'c')
 
     graph = cb.Graph(g)
-    mapped = graph.map({'a': [1, 2, 3], 'b': [11, 12, 13]})
+    mapped = graph.map({'a': [1, 2, 3], 'b': [11, 12, 13]}).reduce('c', name='d')
     # Note: This is a limitation of the current implementation. We could check if the
     # indices are identical and allow this. For simplicity we currently do not.
     with pytest.raises(ValueError, match="Conflicting new index names"):
-        mapped['b'] = mapped['a']
+        mapped['x'] = mapped['d']
+
+
+def test_setitem_does_currently_not_support_slice_assignment() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    with pytest.raises(NotImplementedError):
+        graph['b':'b'] = graph['b']
+    with pytest.raises(NotImplementedError):
+        graph['b':'a'] = graph['b']
+
+
+def test_setitem_raises_if_value_graph_does_not_have_unique_sink() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('a', 'c')
+
+    graph = cb.Graph(g)
+    with pytest.raises(ValueError, match="Graph must have exactly one sink node"):
+        graph['a'] = graph
 
 
 @pytest.mark.parametrize(

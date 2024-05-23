@@ -380,8 +380,6 @@ class Graph:
         graph = nx.relabel_nodes(graph, new_names)
 
         # Get values using previously stored index values
-        # TODO We could and should(?) probably use positional indexing here, which would
-        # be faster?
         for node in graph.nodes:
             if (
                 isinstance(node, NodeName)
@@ -426,6 +424,8 @@ class Graph:
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
+        if isinstance(sink, MappedNode) or isinstance(branch, MappedNode):
+            raise NotImplementedError('Mapped nodes not supported yet in __setitem__')
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
         if branch in self.graph:
             graph = _remove_ancestors(self.graph, branch)
