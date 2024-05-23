@@ -373,7 +373,7 @@ def test_reduce_raises_if_new_node_name_exists() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
-    with pytest.raises(ValueError, match="Node other already exists in the graph."):
+    with pytest.raises(ValueError, match="Node 'other' already exists in the graph."):
         mapped.reduce(name='other')
 
 

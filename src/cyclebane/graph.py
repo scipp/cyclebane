@@ -315,7 +315,7 @@ class Graph:
         else:
             new_index = None
         if name in self.graph:
-            raise ValueError(f'Node {name} already exists in the graph.')
+            raise ValueError(f"Node '{name}' already exists in the graph.")
 
         graph = self.graph.copy()
         name = MappedNode(name=name, indices=new_index) if new_index else name
