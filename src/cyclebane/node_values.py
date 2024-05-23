@@ -256,35 +256,29 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
         """Return the column with the given name."""
         return self._values[key]
 
-    def _to_value_arrays(
-        self, values: Mapping[Hashable, Sequence[Any]]
-    ) -> Mapping[Hashable, ValueArray]:
+    @staticmethod
+    def from_mapping(
+        values: Mapping[Hashable, Sequence[Any]], axis_zero: int
+    ) -> NodeValues:
+        """Construct from a mapping of node names to value sequences."""
         keys = tuple(values)
-        ndim = len(self.indices)
         if (columns := getattr(values, 'columns', None)) is not None:
-            return {
-                key: PandasSeriesAdapter(values.iloc[:, i], axis_zero=ndim)
+            value_arrays = {
+                key: PandasSeriesAdapter(values.iloc[:, i], axis_zero=axis_zero)
                 for key, i in zip(keys, range(len(columns)))
             }
-        return {
-            key: ValueArray.from_array_like(values[key], axis_zero=ndim) for key in keys
-        }
-
-    def merge_from_mapping(
-        self, node_values: Mapping[Hashable, Sequence[Any]]
-    ) -> NodeValues:
-        """Append from a mapping of node names to value sequences."""
-        for node in node_values:
-            if node in self:
-                raise ValueError(f"Node '{node}' has already been mapped")
-        value_arrays = self._to_value_arrays(node_values)
-        shapes = {array.shape for array in value_arrays.values()}
-        if len(shapes) != 1:
-            raise ValueError(
-                'All value sequences in a map operation must have the same shape. '
-                'Use multiple map operations if necessary.'
-            )
-        return self.merge(value_arrays)
+        else:
+            value_arrays = {
+                key: ValueArray.from_array_like(values[key], axis_zero=axis_zero)
+                for key in keys
+            }
+            shapes = {array.shape for array in value_arrays.values()}
+            if len(shapes) > 1:
+                raise ValueError(
+                    'All value sequences in a map operation must have the same shape. '
+                    'Use multiple map operations if necessary.'
+                )
+        return NodeValues(value_arrays)
 
     def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
         if value_arrays:
@@ -294,6 +288,9 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
                     f'Conflicting new index names {named} with existing '
                     f'{tuple(self.indices)}'
                 )
+        for node in value_arrays:
+            if node in self:
+                raise ValueError(f"Node '{node}' has already been mapped")
         return NodeValues({**self._values, **value_arrays})
 
     def get_columns(self, keys: list[Hashable]) -> NodeValues:

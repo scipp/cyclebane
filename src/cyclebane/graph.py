@@ -246,24 +246,25 @@ class Graph:
             support slicing, e.g., NumPy arrays, Xarray DataArrays, Pandas DataFrames,
             etc.
         """
-        _node_values = self._node_values.merge_from_mapping(node_values)
-        root_nodes = tuple(node_values.keys())
-        named = tuple(
-            idx for idx in _node_values.indices if idx not in self._node_values.indices
+        new_values = NodeValues.from_mapping(
+            node_values, axis_zero=len(self.index_names)
         )
 
         # Make sure root nodes exist in graph, add them if not. This choice allows for
         # mapping, e.g., with multiple columns from a DataFrame, representing labels
         # used later for groupby operations.
         graph = self.graph.copy()
-        graph.add_nodes_from(root_nodes)
+        graph.add_nodes_from(new_values)
 
-        successors = _find_successors(graph, root_nodes=root_nodes)
+        successors = _find_successors(graph, root_nodes=new_values)
         name_mapping: dict[Hashable, MappedNode] = {}
         for node in successors:
-            name_mapping[node] = _node_with_indices(node, named)
+            name_mapping[node] = _node_with_indices(node, tuple(new_values.indices))
 
-        return Graph(nx.relabel_nodes(graph, name_mapping), node_values=_node_values)
+        return Graph(
+            nx.relabel_nodes(graph, name_mapping),
+            node_values=self._node_values.merge(new_values),
+        )
 
     def reduce(
         self,

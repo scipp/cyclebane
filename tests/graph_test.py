@@ -13,13 +13,13 @@ import cyclebane as cb
 
 
 @pytest.mark.parametrize('params', [{}, pd.DataFrame()])
-def test_map_raises_when_mapping_over_empty(params) -> None:
+def test_map_can_map_over_empty(params) -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
-        graph.map(params)
+    mapped = graph.map(params)
+    assert len(mapped.to_networkx().nodes) == 2
 
 
 @pytest.mark.parametrize(
