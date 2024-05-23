@@ -26,13 +26,25 @@ class ValueArray(ABC):
     simple Python iterables.
     """
 
+    _registry = []
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        ValueArray._registry.append(cls)
+
     @staticmethod
     def from_array_like(values: Any, *, axis_zero: int = 0) -> ValueArray:
-        if hasattr(values, 'dims'):
-            return DataArrayAdapter(values)
-        if values.__class__.__name__ == 'ndarray':
-            return NumpyArrayAdapter(values, axis_zero=axis_zero)
-        return SequenceAdapter(values, axis_zero=axis_zero)
+        # Reversed to ensure SequenceAdapter is tried last, as it is the most general
+        # SequenceAdapter is defined right after this class so it is registered first
+        for subclass in reversed(ValueArray._registry):
+            if (a := subclass.try_from(values, axis_zero=axis_zero)) is not None:
+                return a
+        raise ValueError(f'Cannot create ValueArray from {values}')
+
+    @staticmethod
+    @abstractmethod
+    def try_from(obj: Any, *, axis_zero: int = 0) -> ValueArray | None:
+        ...
 
     @abstractmethod
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
@@ -58,10 +70,63 @@ class ValueArray(ABC):
         pass
 
 
+class SequenceAdapter(ValueArray):
+    def __init__(
+        self,
+        values: Sequence[Any],
+        *,
+        index: Iterable[IndexValue] | None = None,
+        axis_zero: int = 0,
+    ):
+        self._values = values
+        self._index = index or range(len(values))
+        self._axis_zero = axis_zero
+
+    @staticmethod
+    def try_from(obj: Any, *, axis_zero: int = 0) -> SequenceAdapter | None:
+        return SequenceAdapter(obj, axis_zero=axis_zero)
+
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
+        if len(key) != 1:
+            raise ValueError('SequenceAdapter only supports single index')
+        _, i = key[0]
+        return self._values[self._index.index(i)]
+
+    def __getitem__(
+        self, key: int | slice | tuple[int | slice, ...]
+    ) -> SequenceAdapter:
+        if isinstance(key, tuple) and len(key) > 1:
+            raise ValueError('SequenceAdapter is always 1-D')
+        return SequenceAdapter(
+            self._values[key], index=self._index[key], axis_zero=self._axis_zero
+        )
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return (len(self._values),)
+
+    @property
+    def index_names(self) -> tuple[IndexName, ...]:
+        return (f'dim_{self._axis_zero}',)
+
+    @property
+    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        return {f'dim_{self._axis_zero}': self._index}
+
+
 class PandasSeriesAdapter(ValueArray):
     def __init__(self, series: 'pandas.Series', *, axis_zero: int = 0):
         self._series = series
         self._axis_zero = axis_zero
+
+    @staticmethod
+    def try_from(obj: Any, *, axis_zero: int = 0) -> PandasSeriesAdapter | None:
+        try:
+            import pandas
+        except ModuleNotFoundError:
+            return False
+        if isinstance(obj, pandas.Series):
+            return PandasSeriesAdapter(obj, axis_zero=axis_zero)
 
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
@@ -103,6 +168,23 @@ class DataArrayAdapter(ValueArray):
         data_array: 'xarray.DataArray | scipp.Variable | scipp.DataArray',
     ):
         self._data_array = data_array
+
+    @staticmethod
+    def try_from(obj: Any, *, axis_zero: int = 0) -> DataArrayAdapter | None:
+        try:
+            import xarray
+
+            if isinstance(obj, xarray.DataArray):
+                return DataArrayAdapter(obj)
+        except ModuleNotFoundError:
+            pass
+        try:
+            import scipp
+
+            if isinstance(obj, (scipp.Variable, scipp.DataArray)):
+                return DataArrayAdapter(obj)
+        except ModuleNotFoundError:
+            pass
 
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         # Note: Eventually we will want to distinguish between dims without coords,
@@ -160,6 +242,15 @@ class NumpyArrayAdapter(ValueArray):
         self._indices = indices
         self._axis_zero = axis_zero
 
+    @staticmethod
+    def try_from(obj: Any, *, axis_zero: int = 0) -> NumpyArrayAdapter | None:
+        try:
+            import numpy
+        except ModuleNotFoundError:
+            return False
+        if isinstance(obj, numpy.ndarray):
+            return NumpyArrayAdapter(obj, axis_zero=axis_zero)
+
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         index_tuple = tuple(self._indices[k].index(i) for k, i in key)
         return self._array[index_tuple]
@@ -194,46 +285,6 @@ class NumpyArrayAdapter(ValueArray):
         return self._indices
 
 
-class SequenceAdapter(ValueArray):
-    def __init__(
-        self,
-        values: Sequence[Any],
-        *,
-        index: Iterable[IndexValue] | None = None,
-        axis_zero: int = 0,
-    ):
-        self._values = values
-        self._index = index or range(len(values))
-        self._axis_zero = axis_zero
-
-    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
-        if len(key) != 1:
-            raise ValueError('SequenceAdapter only supports single index')
-        _, i = key[0]
-        return self._values[self._index.index(i)]
-
-    def __getitem__(
-        self, key: int | slice | tuple[int | slice, ...]
-    ) -> SequenceAdapter:
-        if isinstance(key, tuple) and len(key) > 1:
-            raise ValueError('SequenceAdapter is always 1-D')
-        return SequenceAdapter(
-            self._values[key], index=self._index[key], axis_zero=self._axis_zero
-        )
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return (len(self._values),)
-
-    @property
-    def index_names(self) -> tuple[IndexName, ...]:
-        return (f'dim_{self._axis_zero}',)
-
-    @property
-    def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        return {f'dim_{self._axis_zero}': self._index}
-
-
 class NodeValues(abc.Mapping[Hashable, ValueArray]):
     """
     A collection of pandas.DataFrame-like objects with distinct indices.
@@ -261,23 +312,16 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
         values: Mapping[Hashable, Sequence[Any]], axis_zero: int
     ) -> NodeValues:
         """Construct from a mapping of node names to value sequences."""
-        keys = tuple(values)
-        if (columns := getattr(values, 'columns', None)) is not None:
-            value_arrays = {
-                key: PandasSeriesAdapter(values.iloc[:, i], axis_zero=axis_zero)
-                for key, i in zip(keys, range(len(columns)))
-            }
-        else:
-            value_arrays = {
-                key: ValueArray.from_array_like(values[key], axis_zero=axis_zero)
-                for key in keys
-            }
-            shapes = {array.shape for array in value_arrays.values()}
-            if len(shapes) > 1:
-                raise ValueError(
-                    'All value sequences in a map operation must have the same shape. '
-                    'Use multiple map operations if necessary.'
-                )
+        value_arrays = {
+            key: ValueArray.from_array_like(value, axis_zero=axis_zero)
+            for key, value in values.items()
+        }
+        shapes = {array.shape for array in value_arrays.values()}
+        if len(shapes) > 1:
+            raise ValueError(
+                'All value sequences in a map operation must have the same shape. '
+                'Use multiple map operations if necessary.'
+            )
         return NodeValues(value_arrays)
 
     def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
