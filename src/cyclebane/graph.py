@@ -118,11 +118,7 @@ def _find_successors(
     for root in root_nodes:
         if graph.in_degree(root) > 0:
             raise ValueError(f"Mapped node '{root}' is not a source node")
-        nodes = nx.dfs_successors(graph, root)
-        successors.update(
-            set(node for node_list in nodes.values() for node in node_list)
-        )
-        successors.add(root)
+        successors.update(nx.descendants(graph, source=root) | {root})
     return successors
 
 
@@ -259,9 +255,8 @@ class Graph:
         # Make sure root nodes exist in graph, add them if not. This choice allows for
         # mapping, e.g., with multiple columns from a DataFrame, representing labels
         # used later for groupby operations.
-        root_node_graph = nx.DiGraph()
-        root_node_graph.add_nodes_from(root_nodes)
-        graph = nx.compose(self.graph, root_node_graph)
+        graph = self.graph.copy()
+        graph.add_nodes_from(root_nodes)
 
         successors = _find_successors(graph, root_nodes=root_nodes)
         name_mapping: dict[Hashable, MappedNode] = {}
