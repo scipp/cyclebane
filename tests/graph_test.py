@@ -12,6 +12,16 @@ import xarray as xr
 import cyclebane as cb
 
 
+def idx(
+    name: str, *index: int, offset=None, dims: tuple[str, ...] = ('dim_0', 'dim_1')
+) -> cb.graph.NodeName:
+    """Helper to create a NodeName with a tuple of indices."""
+    return cb.graph.NodeName(
+        name,
+        cb.graph.IndexValues(dims[offset : len(index) + (offset or 0)], tuple(index)),
+    )
+
+
 @pytest.mark.parametrize('params', [{}, pd.DataFrame()])
 def test_map_can_map_over_empty(params) -> None:
     g = nx.DiGraph()
@@ -37,13 +47,8 @@ def test_map_adds_node_when_mapping_nonexistent_node(params) -> None:
     graph = cb.Graph(g)
     mapped = graph.map(params)
     result = mapped.to_networkx()
-    c_data = [
-        data
-        for node, data in result.nodes(data=True)
-        if getattr(node, 'name', None) == 'c'
-    ]
-    c_values = [data['value'] for data in c_data]
-    assert c_values == [1, 2]
+    assert result.nodes[idx('c', 0)] == {'value': 1}
+    assert result.nodes[idx('c', 1)] == {'value': 2}
 
 
 def test_map_raises_if_mapping_non_source_node() -> None:
@@ -87,11 +92,12 @@ def test_map_over_list_adds_value_attrs_to_source_nodes() -> None:
     mapped = graph.map({'a': [1, 2, 3]})
     result = mapped.to_networkx()
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [1, 2, 3]
-    b_data = [data for node, data in result.nodes(data=True) if node.name == 'b']
-    assert not any('value' in data for data in b_data)
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+    assert result.nodes[idx('b', 0)] == {}
+    assert result.nodes[idx('b', 1)] == {}
+    assert result.nodes[idx('b', 2)] == {}
 
 
 def test_map_does_not_duplicate_unrelated_node() -> None:
@@ -115,13 +121,11 @@ def test_chained_map_over_list() -> None:
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
     result = mapped.to_networkx()
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [1, 2, 3]
-
-    x_data = [data for node, data in result.nodes(data=True) if node.name == 'x']
-    x_values = [data['value'] for data in x_data]
-    assert x_values == [4, 5]
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+    assert result.nodes[idx('x', 0, offset=1)] == {'value': 4}
+    assert result.nodes[idx('x', 1, offset=1)] == {'value': 5}
 
 
 def test_map_does_not_descend_into_nested_lists() -> None:
@@ -182,13 +186,13 @@ def test_map_pandas_dataframe() -> None:
     result = mapped.to_networkx()
     assert len(result.nodes) == 3 * 3
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == params['a'].to_list()
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
 
-    b_data = [data for node, data in result.nodes(data=True) if node.name == 'b']
-    b_values = [data['value'] for data in b_data]
-    assert b_values == params['b'].to_list()
+    assert result.nodes[idx('b', 0)] == {'value': 4}
+    assert result.nodes[idx('b', 1)] == {'value': 5}
+    assert result.nodes[idx('b', 2)] == {'value': 6}
 
 
 def test_map_pandas_dataframe_sets_up_default_index_name() -> None:
@@ -244,13 +248,13 @@ def test_map_pandas_dataframe_with_type_as_col_name_works() -> None:
     result = mapped.to_networkx()
     assert len(result.nodes) == 3 * 3
 
-    int_data = [data for node, data in result.nodes(data=True) if node.name == int]
-    int_values = [data['value'] for data in int_data]
-    assert int_values == raw_params[int]
+    assert result.nodes[idx(int, 0)] == {'value': 1}
+    assert result.nodes[idx(int, 1)] == {'value': 2}
+    assert result.nodes[idx(int, 2)] == {'value': 3}
 
-    float_data = [data for node, data in result.nodes(data=True) if node.name == float]
-    float_values = [data['value'] for data in float_data]
-    assert float_values == raw_params[float]
+    assert result.nodes[idx(float, 0)] == {'value': 0.1}
+    assert result.nodes[idx(float, 1)] == {'value': 0.2}
+    assert result.nodes[idx(float, 2)] == {'value': 0.3}
 
 
 def test_map_scipp_variable_uses_dims_as_index_names() -> None:
@@ -303,18 +307,15 @@ def test_map_scipp_data_array_uses_coord_as_indices_if_present() -> None:
     assert sc.identical(a_values[0:3], da['x', 0])
     assert sc.identical(a_values[3:6], da['x', 1])
 
-    def idx(name: str, i0: int, i1: float) -> cb.graph.NodeName:
-        return cb.graph.NodeName(name, cb.graph.IndexValues(('x', 'y'), (i0, i1)))
-
     for name in ['a', 'b']:
         # Note that due to current shortcomings in scipp the indices are tuples of the
         # form (value, unit) and not the corresponding 0-D scipp.Variable.
-        assert idx(name, 0, (0.0, 'mm')) in result
-        assert idx(name, 0, (0.5, 'mm')) in result
-        assert idx(name, 0, (1.0, 'mm')) in result
-        assert idx(name, 1, (0.0, 'mm')) in result
-        assert idx(name, 1, (0.5, 'mm')) in result
-        assert idx(name, 1, (1.0, 'mm')) in result
+        assert idx(name, 0, (0.0, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 0, (0.5, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 0, (1.0, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 1, (0.0, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 1, (0.5, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 1, (1.0, 'mm'), dims=('x', 'y')) in result
 
 
 def test_map_xarray_data_array_uses_coord_as_indices_if_present() -> None:
@@ -331,18 +332,13 @@ def test_map_xarray_data_array_uses_coord_as_indices_if_present() -> None:
     assert mapped.index_names == ('x', 'y')
     result = mapped.to_networkx()
 
-    def idx(name: str, i0: int, i1: float) -> cb.graph.NodeName:
-        return cb.graph.NodeName(name, cb.graph.IndexValues(('x', 'y'), (i0, i1)))
-
     for name in ['a', 'b']:
-        # Note that due to current shortcomings in scipp the indices are tuples of the
-        # form (value, unit) and not the corresponding 0-D scipp.Variable.
-        assert idx(name, 0, 0.0) in result
-        assert idx(name, 0, 0.5) in result
-        assert idx(name, 0, 1.0) in result
-        assert idx(name, 1, 0.0) in result
-        assert idx(name, 1, 0.5) in result
-        assert idx(name, 1, 1.0) in result
+        assert idx(name, 0, 0.0, dims=('x', 'y')) in result
+        assert idx(name, 0, 0.5, dims=('x', 'y')) in result
+        assert idx(name, 0, 1.0, dims=('x', 'y')) in result
+        assert idx(name, 1, 0.0, dims=('x', 'y')) in result
+        assert idx(name, 1, 0.5, dims=('x', 'y')) in result
+        assert idx(name, 1, 1.0, dims=('x', 'y')) in result
 
 
 def test_reduce_scipp_mapped() -> None:
@@ -394,15 +390,14 @@ def test_map_reduce() -> None:
     assert len(reduced.to_networkx().nodes) == 19
     # Axis 1 reduces 'a', so there are 3 reduce nodes.
     reduced = mapped.reduce(name='func', axis=0)
-    assert len(reduced.to_networkx().nodes) == 20
+    result = reduced.to_networkx()
+    assert len(result.nodes) == 20
 
-    a_data = [
-        data
-        for node, data in reduced.to_networkx().nodes(data=True)
-        if node.name == 'a'
-    ]
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [1, 2, 3]
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+    assert result.nodes[idx('x', 0, offset=1)] == {'value': 4}
+    assert result.nodes[idx('x', 1, offset=1)] == {'value': 5}
 
 
 def test_reduce_all_axes() -> None:
@@ -766,9 +761,9 @@ def test_slice_by_position(param_table: Mapping[Hashable, Sequence[int]]) -> Non
     assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (1,))) in result
     assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (2,))) in result
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [2, 3]
+    assert idx('a', 0) not in result
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
 
 
 @pytest.mark.parametrize(
@@ -787,18 +782,12 @@ def test_by_position_2d_slice_outer(values) -> None:
     sliced = mapped.by_position('dim_0')[1:]
     result = sliced.to_networkx()
 
-    def idx(i0: int, i1: int) -> cb.graph.NodeName:
-        return cb.graph.NodeName(
-            'a', cb.graph.IndexValues(('dim_0', 'dim_1'), (i0, i1))
-        )
-
-    print(list(result.nodes))
-    assert idx(0, 0) not in result
-    assert idx(0, 1) not in result
-    assert idx(0, 2) not in result
-    assert idx(1, 0) in result
-    assert idx(1, 1) in result
-    assert idx(1, 2) in result
+    assert idx('a', 0, 0) not in result
+    assert idx('a', 0, 1) not in result
+    assert idx('a', 0, 2) not in result
+    assert idx('a', 1, 0) in result
+    assert idx('a', 1, 1) in result
+    assert idx('a', 1, 2) in result
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
     a_values = [data['value'] for data in a_data]
@@ -814,22 +803,17 @@ def test_by_position_2d_slice_inner() -> None:
     sliced = mapped.by_position('dim_1')[:2]
     result = sliced.to_networkx()
 
-    def idx(i0: int, i1: int) -> cb.graph.NodeName:
-        return cb.graph.NodeName(
-            'a', cb.graph.IndexValues(('dim_0', 'dim_1'), (i0, i1))
-        )
+    assert idx('a', 0, 0) in result
+    assert idx('a', 0, 1) in result
+    assert idx('a', 0, 2) not in result
+    assert idx('a', 1, 0) in result
+    assert idx('a', 1, 1) in result
+    assert idx('a', 1, 2) not in result
 
-    assert idx(0, 0) in result
-    assert idx(0, 1) in result
-    assert idx(0, 2) not in result
-    assert idx(1, 0) in result
-    assert idx(1, 1) in result
-    assert idx(1, 2) not in result
-
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values[0:2] == [1, 2]
-    assert a_values[2:4] == [4, 5]
+    assert result.nodes[idx('a', 0, 0)] == {'value': 1}
+    assert result.nodes[idx('a', 0, 1)] == {'value': 2}
+    assert result.nodes[idx('a', 1, 0)] == {'value': 4}
+    assert result.nodes[idx('a', 1, 1)] == {'value': 5}
 
 
 def test_node_attrs_are_preserved() -> None:
@@ -889,9 +873,6 @@ def test_node_attrs_are_preserved_in_map() -> None:
     mapped = graph.map({'a': [1, 2, 3]})
     value_attr = 'myvalue'
     result = mapped.to_networkx(value_attr=value_attr)
-
-    def idx(name: str, i: int) -> cb.graph.NodeName:
-        return cb.graph.NodeName(name, cb.graph.IndexValues(('dim_0',), (i,)))
 
     assert result.nodes[idx('a', 0)] == {'attr': 11, 'myvalue': 1}
     assert result.nodes[idx('a', 1)] == {'attr': 11, 'myvalue': 2}
