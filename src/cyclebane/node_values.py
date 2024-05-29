@@ -130,7 +130,7 @@ class PandasSeriesAdapter(ValueArray):
         try:
             import pandas
         except ModuleNotFoundError:
-            return False
+            return None
         if isinstance(obj, pandas.Series):
             return PandasSeriesAdapter(obj, axis_zero=axis_zero)
 
@@ -304,7 +304,7 @@ class NumpyArrayAdapter(ValueArray):
         try:
             import numpy
         except ModuleNotFoundError:
-            return False
+            return None
         if isinstance(obj, numpy.ndarray):
             return NumpyArrayAdapter(obj, axis_zero=axis_zero)
 
