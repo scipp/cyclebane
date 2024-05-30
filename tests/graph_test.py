@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2023 Scipp contributors (https://github.com/scipp)
+from typing import Hashable, Mapping, Sequence
+
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -10,14 +12,24 @@ import xarray as xr
 import cyclebane as cb
 
 
+def idx(
+    name: str, *index: int, offset=None, dims: tuple[str, ...] = ('dim_0', 'dim_1')
+) -> cb.graph.NodeName:
+    """Helper to create a NodeName with a tuple of indices."""
+    return cb.graph.NodeName(
+        name,
+        cb.graph.IndexValues(dims[offset : len(index) + (offset or 0)], tuple(index)),
+    )
+
+
 @pytest.mark.parametrize('params', [{}, pd.DataFrame()])
-def test_map_raises_when_mapping_over_empty(params) -> None:
+def test_map_can_map_over_empty(params) -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
-        graph.map(params)
+    mapped = graph.map(params)
+    assert len(mapped.to_networkx().nodes) == 2
 
 
 @pytest.mark.parametrize(
@@ -28,13 +40,15 @@ def test_map_raises_when_mapping_over_empty(params) -> None:
         pd.DataFrame({'a': [1, 2], 'c': [1, 2]}),
     ],
 )
-def test_map_raises_if_mapping_nonexistent_node(params) -> None:
+def test_map_adds_node_when_mapping_nonexistent_node(params) -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
-        graph.map(params)
+    mapped = graph.map(params)
+    result = mapped.to_networkx()
+    assert result.nodes[idx('c', 0)] == {'value': 1}
+    assert result.nodes[idx('c', 1)] == {'value': 2}
 
 
 def test_map_raises_if_mapping_non_source_node() -> None:
@@ -43,7 +57,7 @@ def test_map_raises_if_mapping_non_source_node() -> None:
     g.add_edge('b', 'c')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Mapped node 'b' is not a source node"):
         graph.map({'b': [1, 2]})
 
 
@@ -54,7 +68,7 @@ def test_map_raises_if_mapping_previously_mapped_source_node() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2]})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
         mapped.map({'a': [1, 2]})
 
 
@@ -64,7 +78,9 @@ def test_map_raises_if_shapes_of_values_are_incompatible() -> None:
     g.add_edge('b', 'c')
 
     graph = cb.Graph(g)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="value sequences in a map operation must have the same shape"
+    ):
         graph.map({'a': [1, 2], 'b': [1, 2, 3]})
 
 
@@ -76,11 +92,12 @@ def test_map_over_list_adds_value_attrs_to_source_nodes() -> None:
     mapped = graph.map({'a': [1, 2, 3]})
     result = mapped.to_networkx()
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [1, 2, 3]
-    b_data = [data for node, data in result.nodes(data=True) if node.name == 'b']
-    assert not any('value' in data for data in b_data)
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+    assert result.nodes[idx('b', 0)] == {}
+    assert result.nodes[idx('b', 1)] == {}
+    assert result.nodes[idx('b', 2)] == {}
 
 
 def test_map_does_not_duplicate_unrelated_node() -> None:
@@ -104,21 +121,20 @@ def test_chained_map_over_list() -> None:
     mapped = graph.map({'a': [1, 2, 3]}).map({'x': [4, 5]})
     result = mapped.to_networkx()
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [1, 2, 3]
-
-    x_data = [data for node, data in result.nodes(data=True) if node.name == 'x']
-    x_values = [data['value'] for data in x_data]
-    assert x_values == [4, 5]
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+    assert result.nodes[idx('x', 0, offset=1)] == {'value': 4}
+    assert result.nodes[idx('x', 1, offset=1)] == {'value': 5}
 
 
-def test_map_does_not_descent_into_nested_lists() -> None:
+def test_map_does_not_descend_into_nested_lists() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [[1, 2], [3, 4]]})
+    assert mapped.index_names == ('dim_0',)
     assert len(mapped.to_networkx().nodes) == 2 + 2
 
 
@@ -138,23 +154,24 @@ def test_map_adds_axis_in_position_0_like_numpy_stack() -> None:
     assert len(sink_nodes) == 3
 
 
-def test_map_2d_numpy_array() -> None:
+def test_map_2d_numpy_array_sets_up_default_index_names() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': np.array([[1, 2, 3], [4, 5, 6]])})
+    assert mapped.index_names == ('dim_0', 'dim_1')
     assert len(mapped.to_networkx().nodes) == 3 * 2 * 2
 
 
-def test_map_2d_xarray_dataarray() -> None:
+def test_map_2d_xarray_dataarray_uses_dims_as_index_names() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
     da = xr.DataArray(dims=('x', 'y'), data=[[1, 2, 3], [4, 5, 6]])
-    print(da, da.dims, da.shape)
     mapped = graph.map({'a': da})
+    assert mapped.index_names == ('x', 'y')
     assert len(mapped.to_networkx().nodes) == 3 * 2 * 2
 
 
@@ -169,13 +186,24 @@ def test_map_pandas_dataframe() -> None:
     result = mapped.to_networkx()
     assert len(result.nodes) == 3 * 3
 
-    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == params['a'].to_list()
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
 
-    b_data = [data for node, data in result.nodes(data=True) if node.name == 'b']
-    b_values = [data['value'] for data in b_data]
-    assert b_values == params['b'].to_list()
+    assert result.nodes[idx('b', 0)] == {'value': 4}
+    assert result.nodes[idx('b', 1)] == {'value': 5}
+    assert result.nodes[idx('b', 2)] == {'value': 6}
+
+
+def test_map_pandas_dataframe_sets_up_default_index_name() -> None:
+    params = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map(params)
+    assert mapped.index_names == ('dim_0',)
 
 
 def test_map_pandas_dataframe_uses_index_name() -> None:
@@ -220,30 +248,31 @@ def test_map_pandas_dataframe_with_type_as_col_name_works() -> None:
     result = mapped.to_networkx()
     assert len(result.nodes) == 3 * 3
 
-    int_data = [data for node, data in result.nodes(data=True) if node.name == int]
-    int_values = [data['value'] for data in int_data]
-    assert int_values == raw_params[int]
+    assert result.nodes[idx(int, 0)] == {'value': 1}
+    assert result.nodes[idx(int, 1)] == {'value': 2}
+    assert result.nodes[idx(int, 2)] == {'value': 3}
 
-    float_data = [data for node, data in result.nodes(data=True) if node.name == float]
-    float_values = [data['value'] for data in float_data]
-    assert float_values == raw_params[float]
+    assert result.nodes[idx(float, 0)] == {'value': 0.1}
+    assert result.nodes[idx(float, 1)] == {'value': 0.2}
+    assert result.nodes[idx(float, 2)] == {'value': 0.3}
 
 
-def test_map_scipp_variable() -> None:
+def test_map_scipp_variable_uses_dims_as_index_names() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
     graph = cb.Graph(g)
     x = sc.array(dims=['x'], values=[1, 2, 3], unit='m')
     mapped = graph.map({'a': x})
+    assert mapped.index_names == ('x',)
     result = mapped.to_networkx()
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values == list(x)
+    a_values = sc.concat([data['value'] for data in a_data], 'x')
+    assert sc.identical(a_values.data, x)
 
 
-def test_map_2d_scipp_variable() -> None:
+def test_map_2d_scipp_variable_uses_dims_as_index_names() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
 
@@ -254,9 +283,62 @@ def test_map_2d_scipp_variable() -> None:
     result = mapped.to_networkx()
 
     a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
-    a_values = [data['value'] for data in a_data]
-    assert a_values[0:3] == list(values['x', 0])
-    assert a_values[3:6] == list(values['x', 1])
+    a_values = sc.concat([data['value'] for data in a_data], 'y')
+    assert sc.identical(a_values[0:3].data, values['x', 0])
+    assert sc.identical(a_values[3:6].data, values['x', 1])
+
+
+def test_map_scipp_data_array_uses_coord_as_indices_if_present() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    values = sc.array(dims=['x', 'y'], values=[[1, 2, 3], [4, 5, 6]], unit='m')
+    da = sc.DataArray(
+        values, coords={'y': sc.linspace(dim='y', start=0, stop=1, num=3, unit='mm')}
+    )
+    mapped = graph.map({'a': da})
+    assert mapped.index_names == ('x', 'y')
+    result = mapped.to_networkx()
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = sc.concat([data['value'] for data in a_data], 'y')
+    del a_values.coords['x']  # auto range index not in reference
+    assert sc.identical(a_values[0:3], da['x', 0])
+    assert sc.identical(a_values[3:6], da['x', 1])
+
+    for name in ['a', 'b']:
+        # Note that due to current shortcomings in scipp the indices are tuples of the
+        # form (value, unit) and not the corresponding 0-D scipp.Variable.
+        assert idx(name, 0, (0.0, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 0, (0.5, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 0, (1.0, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 1, (0.0, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 1, (0.5, 'mm'), dims=('x', 'y')) in result
+        assert idx(name, 1, (1.0, 'mm'), dims=('x', 'y')) in result
+
+
+def test_map_xarray_data_array_uses_coord_as_indices_if_present() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    da = xr.DataArray(
+        dims=('x', 'y'),
+        data=np.array([[1, 2, 3], [4, 5, 6]]),
+        coords={'y': np.linspace(start=0, stop=1, num=3)},
+    )
+    mapped = graph.map({'a': da})
+    assert mapped.index_names == ('x', 'y')
+    result = mapped.to_networkx()
+
+    for name in ['a', 'b']:
+        assert idx(name, 0, 0.0, dims=('x', 'y')) in result
+        assert idx(name, 0, 0.5, dims=('x', 'y')) in result
+        assert idx(name, 0, 1.0, dims=('x', 'y')) in result
+        assert idx(name, 1, 0.0, dims=('x', 'y')) in result
+        assert idx(name, 1, 0.5, dims=('x', 'y')) in result
+        assert idx(name, 1, 1.0, dims=('x', 'y')) in result
 
 
 def test_reduce_scipp_mapped() -> None:
@@ -308,15 +390,14 @@ def test_map_reduce() -> None:
     assert len(reduced.to_networkx().nodes) == 19
     # Axis 1 reduces 'a', so there are 3 reduce nodes.
     reduced = mapped.reduce(name='func', axis=0)
-    assert len(reduced.to_networkx().nodes) == 20
+    result = reduced.to_networkx()
+    assert len(result.nodes) == 20
 
-    a_data = [
-        data
-        for node, data in reduced.to_networkx().nodes(data=True)
-        if node.name == 'a'
-    ]
-    a_values = [data['value'] for data in a_data]
-    assert a_values == [1, 2, 3]
+    assert result.nodes[idx('a', 0)] == {'value': 1}
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+    assert result.nodes[idx('x', 0, offset=1)] == {'value': 4}
+    assert result.nodes[idx('x', 1, offset=1)] == {'value': 5}
 
 
 def test_reduce_all_axes() -> None:
@@ -348,7 +429,7 @@ def test_reduce_raises_if_new_node_name_exists() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Node 'other' already exists in the graph."):
         mapped.reduce(name='other')
 
 
@@ -365,7 +446,7 @@ def test_reduce_raises_if_axis_or_does_not_exist(indexer) -> None:
 
 
 @pytest.mark.parametrize('indexer', [{'axis': 1}, {'index': 'y'}])
-def test_reduce_raises_of_node_does_not_have_the_specified_axis_or_index(
+def test_reduce_raises_if_node_does_not_have_the_specified_axis_or_index(
     indexer,
 ) -> None:
     g = nx.DiGraph()
@@ -374,7 +455,7 @@ def test_reduce_raises_of_node_does_not_have_the_specified_axis_or_index(
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': sc.arange('x', 3)})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Node 'b' does not have "):
         # We mapped 'a' but 'b' is not a descendant of 'a'.
         mapped.reduce('b', name='combine', **indexer)
 
@@ -533,3 +614,269 @@ def test_setitem_raises_on_conflicting_input_nodes_in_ancestor() -> None:
     graph = cb.Graph(g1)
     with pytest.raises(ValueError, match="Node inputs differ for node 'b'"):
         graph['x'] = cb.Graph(g2)
+
+
+def test_getitem_returns_graph_containing_only_key_and_ancestors() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.add_edge('c', 'd')
+    g.add_edge('x', 'd')
+
+    graph = cb.Graph(g)
+    subgraph = graph['c']
+    result = subgraph.to_networkx()
+    assert len(result.nodes) == 3
+    assert len(result.edges) == 2
+    assert 'a' in result
+    assert 'b' in result
+    assert 'c' in result
+
+
+def test_getitem_setitem_with_no_effects() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['value'] = 1
+
+    graph = cb.Graph(g)
+    graph['b'] = graph['b']
+    assert graph.to_networkx().nodes['a']['value'] == 1
+    # Note that we cannot currently do the following:
+    #   mapped = graph.map({'a': [1, 2, 3]})
+    #   mapped['b'] = mapped['b']
+    # because the check for compatible indices/node-values is not implemented.
+
+
+def test_getitem_keeps_only_relevant_indices() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    assert mapped['a'].indices == {'dim_0': range(3)}
+    assert mapped['b'].indices == {}  # Not mapped
+    assert mapped['c'].indices == {'dim_0': range(3)}
+
+
+def test_getitem_keeps_only_relevant_node_values() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    # This fails due to existing mapping...
+    with pytest.raises(ValueError):
+        mapped.map({'a': [1, 2]})
+    # ... but getitem drops the 'a' mapping, so we can map 'a' again:
+    mapped['b'].map({'a': [1, 2]})
+
+
+def test_getitem_on_mapped_graph_with_base_node_name_returns_mapped_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    result = mapped['b'].to_networkx()
+    assert len(result.nodes) == 6
+
+
+def test_setitem_with_mapped_sink_node_raises_if_target_is_not_mapped() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
+    with pytest.raises(
+        NotImplementedError, match="Mapped nodes not supported yet in __setitem__"
+    ):
+        graph['b'] = b
+
+
+def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    d = cb.Graph(nx.DiGraph()).map({'b': [11, 12]}).reduce('b', name='d')
+    with pytest.raises(ValueError, match="Conflicting new index names"):
+        mapped['x'] = d
+
+
+def test_setitem_currently_does_not_allow_compatible_indices() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3], 'b': [11, 12, 13]}).reduce('c', name='d')
+    # Note: This is a limitation of the current implementation. We could check if the
+    # indices are identical and allow this. For simplicity we currently do not.
+    with pytest.raises(ValueError, match="Conflicting new index names"):
+        mapped['x'] = mapped['d']
+
+
+def test_setitem_does_currently_not_support_slice_assignment() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    with pytest.raises(NotImplementedError):
+        graph['b':'b'] = graph['b']
+    with pytest.raises(NotImplementedError):
+        graph['b':'a'] = graph['b']
+
+
+def test_setitem_raises_if_value_graph_does_not_have_unique_sink() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('a', 'c')
+
+    graph = cb.Graph(g)
+    with pytest.raises(ValueError, match="Graph must have exactly one sink node"):
+        graph['a'] = graph
+
+
+@pytest.mark.parametrize(
+    'param_table',
+    [{'a': [1, 2, 3]}, {'a': np.array([1, 2, 3])}, pd.DataFrame({'a': [1, 2, 3]})],
+)
+def test_slice_by_position(param_table: Mapping[Hashable, Sequence[int]]) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map(param_table)
+    sliced = mapped.by_position('dim_0')[1:3]
+    result = sliced.to_networkx()
+    assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (0,))) not in result
+    assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (1,))) in result
+    assert cb.graph.NodeName('a', cb.graph.IndexValues(('dim_0',), (2,))) in result
+
+    assert idx('a', 0) not in result
+    assert result.nodes[idx('a', 1)] == {'value': 2}
+    assert result.nodes[idx('a', 2)] == {'value': 3}
+
+
+@pytest.mark.parametrize(
+    'values',
+    [
+        np.array([[1, 2, 3], [4, 5, 6]]),
+        xr.DataArray(dims=('dim_0', 'dim_1'), data=[[1, 2, 3], [4, 5, 6]]),
+    ],
+)
+def test_by_position_2d_slice_outer(values) -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': values})
+    sliced = mapped.by_position('dim_0')[1:]
+    result = sliced.to_networkx()
+
+    assert idx('a', 0, 0) not in result
+    assert idx('a', 0, 1) not in result
+    assert idx('a', 0, 2) not in result
+    assert idx('a', 1, 0) in result
+    assert idx('a', 1, 1) in result
+    assert idx('a', 1, 2) in result
+
+    a_data = [data for node, data in result.nodes(data=True) if node.name == 'a']
+    a_values = [data['value'] for data in a_data]
+    assert a_values[0:3] == [4, 5, 6]
+
+
+def test_by_position_2d_slice_inner() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': np.array([[1, 2, 3], [4, 5, 6]])})
+    sliced = mapped.by_position('dim_1')[:2]
+    result = sliced.to_networkx()
+
+    assert idx('a', 0, 0) in result
+    assert idx('a', 0, 1) in result
+    assert idx('a', 0, 2) not in result
+    assert idx('a', 1, 0) in result
+    assert idx('a', 1, 1) in result
+    assert idx('a', 1, 2) not in result
+
+    assert result.nodes[idx('a', 0, 0)] == {'value': 1}
+    assert result.nodes[idx('a', 0, 1)] == {'value': 2}
+    assert result.nodes[idx('a', 1, 0)] == {'value': 4}
+    assert result.nodes[idx('a', 1, 1)] == {'value': 5}
+
+
+def test_node_attrs_are_preserved() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.nodes['a']['attr'] = 1
+
+    graph = cb.Graph(g)
+    result = graph.to_networkx()
+    assert result.nodes['a'] == {'attr': 1}
+
+
+def test_node_attrs_are_preserved_in_getitem() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['attr1'] = 1
+    g.nodes['b']['attr2'] = 2
+    g.nodes['c']['attr3'] = 3
+
+    graph = cb.Graph(g)
+    result = graph['c'].to_networkx()
+    assert result.nodes['a'] == {'attr1': 1}
+    assert result.nodes['b'] == {'attr2': 2}
+
+
+def test_node_attrs_are_preserved_in_setitem() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'c')
+    g1.add_edge('b', 'c')
+    g1.nodes['a']['attr1'] = 1
+    g1.nodes['b']['attr2'] = 2
+    g1.nodes['c']['attr3'] = 3
+
+    graph = cb.Graph(g1)
+    g2 = nx.DiGraph()
+    g2.add_edge('x', 'b')
+    g2.nodes['x']['attr4'] = 4
+    g2.nodes['b']['attr5'] = 5
+
+    graph['b'] = cb.Graph(g2)
+
+    result = graph.to_networkx()
+    assert result.nodes['a'] == {'attr1': 1}
+    assert result.nodes['b'] == {'attr5': 5}  # b was replaced
+    assert result.nodes['c'] == {'attr3': 3}
+    assert result.nodes['x'] == {'attr4': 4}
+
+
+def test_node_attrs_are_preserved_in_map() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.nodes['a']['attr'] = 11
+    g.nodes['b']['attr'] = 22
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    value_attr = 'myvalue'
+    result = mapped.to_networkx(value_attr=value_attr)
+
+    assert result.nodes[idx('a', 0)] == {'attr': 11, 'myvalue': 1}
+    assert result.nodes[idx('a', 1)] == {'attr': 11, 'myvalue': 2}
+    assert result.nodes[idx('a', 2)] == {'attr': 11, 'myvalue': 3}
+    assert result.nodes[idx('b', 0)] == {'attr': 22}
+    assert result.nodes[idx('b', 1)] == {'attr': 22}
+    assert result.nodes[idx('b', 2)] == {'attr': 22}
