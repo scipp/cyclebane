@@ -1,17 +1,19 @@
-# -*- coding: utf-8 -*-
-
 import doctest
 import os
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as get_version
 
-import cyclebane
+from sphinx.util import logging
 
 sys.path.insert(0, os.path.abspath('.'))
 
+logger = logging.getLogger(__name__)
+
 # General information about the project.
-project = u'Cyclebane'
-copyright = u'2024 Scipp contributors'
-author = u'Scipp contributors'
+project = 'Cyclebane'
+copyright = '2024 Scipp contributors'
+author = 'Scipp contributors'
 
 html_show_sourcelink = True
 
@@ -30,12 +32,16 @@ extensions = [
     'nbsphinx',
     'myst_parser',
 ]
+
 try:
     import sciline.sphinxext.domain_types  # noqa: F401
 
     extensions.append('sciline.sphinxext.domain_types')
+    # See https://github.com/tox-dev/sphinx-autodoc-typehints/issues/457
+    suppress_warnings = ["config.cache"]
 except ModuleNotFoundError:
     pass
+
 
 myst_enable_extensions = [
     "amsmath",
@@ -81,6 +87,7 @@ napoleon_type_aliases = {
 typehints_defaults = 'comma'
 typehints_use_rtype = False
 
+
 sciline_domain_types_prefix = 'cyclebane'
 sciline_domain_types_aliases = {
     'scipp._scipp.core.DataArray': 'scipp.DataArray',
@@ -90,6 +97,7 @@ sciline_domain_types_aliases = {
     'scipp._scipp.core.Variable': 'scipp.Variable',
     'scipp.core.data_group.DataGroup': 'scipp.DataGroup',
 }
+
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -108,10 +116,15 @@ master_doc = 'index'
 # built documents.
 #
 
-# The short X.Y version.
-version = cyclebane.__version__
-# The full version, including alpha/beta/rc tags.
-release = cyclebane.__version__
+try:
+    release = get_version("cyclebane")
+    version = ".".join(release.split('.')[:3])  # CalVer
+except PackageNotFoundError:
+    logger.info(
+        "Warning: determining version from package metadata failed, falling back to "
+        "a dummy version number."
+    )
+    release = version = "0.0.0-dev"
 
 warning_is_error = True
 
