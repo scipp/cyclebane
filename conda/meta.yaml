@@ -27,7 +27,11 @@ test:
   imports:
     - cyclebane
   requires:
+    - numpy
+    - pandas
     - pytest
+    - scipp
+    - xarray
   source_files:
     - pyproject.toml
     - tests/
