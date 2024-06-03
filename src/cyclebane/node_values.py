@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections import abc
-from typing import TYPE_CHECKING, Any, Hashable, Iterable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     import numpy
@@ -26,7 +26,7 @@ class ValueArray(ABC):
     simple Python iterables.
     """
 
-    _registry = []
+    _registry: ClassVar = []
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -43,8 +43,7 @@ class ValueArray(ABC):
 
     @staticmethod
     @abstractmethod
-    def try_from(obj: Any, *, axis_zero: int = 0) -> ValueArray | None:
-        ...
+    def try_from(obj: Any, *, axis_zero: int = 0) -> ValueArray | None: ...
 
     @abstractmethod
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
@@ -121,7 +120,7 @@ class SequenceAdapter(ValueArray):
 
 
 class PandasSeriesAdapter(ValueArray):
-    def __init__(self, series: 'pandas.Series', *, axis_zero: int = 0):
+    def __init__(self, series: pandas.Series, *, axis_zero: int = 0):
         self._series = series
         self._axis_zero = axis_zero
 
@@ -170,7 +169,7 @@ class PandasSeriesAdapter(ValueArray):
 class XarrayDataArrayAdapter(ValueArray):
     def __init__(
         self,
-        data_array: 'xarray.DataArray',
+        data_array: xarray.DataArray,
     ):
         default_indices = {
             dim: range(size)
@@ -211,7 +210,7 @@ class XarrayDataArrayAdapter(ValueArray):
 
 
 class ScippDataArrayAdapter(ValueArray):
-    def __init__(self, data_array: 'scipp.DataArray'):
+    def __init__(self, data_array: scipp.DataArray):
         import scipp
 
         default_indices = {
@@ -264,7 +263,7 @@ class ScippDataArrayAdapter(ValueArray):
     def index_names(self) -> tuple[IndexName, ...]:
         return tuple(self._data_array.dims)
 
-    def _index_for_dim(self, dim: str) -> list[tuple[Any, 'scipp.Unit']]:
+    def _index_for_dim(self, dim: str) -> list[tuple[Any, scipp.Unit]]:
         # Work around some NetworkX errors. Probably scipp.Variable lacks functionality.
         # For now we return a list of tuples, where the first element is the value and
         # the second is the unit.
@@ -283,7 +282,7 @@ class ScippDataArrayAdapter(ValueArray):
 class NumpyArrayAdapter(ValueArray):
     def __init__(
         self,
-        array: 'numpy.ndarray',
+        array: numpy.ndarray,
         *,
         indices: dict[IndexName, Iterable[IndexValue]] | None = None,
         axis_zero: int = 0,
@@ -335,7 +334,7 @@ class NumpyArrayAdapter(ValueArray):
         return self._indices
 
 
-class NodeValues(abc.Mapping[Hashable, ValueArray]):
+class NodeValues(Mapping[Hashable, ValueArray]):
     """
     A collection of pandas.DataFrame-like objects with distinct indices.
 
@@ -349,7 +348,7 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
         """Return the number of columns."""
         return len(self._values)
 
-    def __iter__(self) -> Iterable[Hashable]:
+    def __iter__(self) -> Iterator[Hashable]:
         """Iterate over the column names."""
         return iter(self._values)
 
@@ -377,7 +376,7 @@ class NodeValues(abc.Mapping[Hashable, ValueArray]):
     def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
         if value_arrays:
             named = next(iter(value_arrays.values())).index_names
-            if any([name in self.indices for name in named]):
+            if any(name in self.indices for name in named):
                 raise ValueError(
                     f'Conflicting new index names {named} with existing '
                     f'{tuple(self.indices)}'
