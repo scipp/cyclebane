@@ -24,18 +24,21 @@ def _get_new_node_name(graph: nx.DiGraph) -> str:
         if name not in graph:
             return name
 
-
 def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
-    graph = graph.copy()
+    graph_without_node = graph.copy()
+    graph_without_node.remove_node(node)
     ancestors = nx.ancestors(graph, node)
-    ancestors_successors = {
-        ancestor: graph.successors(ancestor) for ancestor in ancestors
+    # Considering the graph we obtain by removing `node`, we need to consider the
+    # descendants of each ancestor. If an ancestor has descendants that are not
+    # removal candidates, we should not remove the ancestor.
+    ancestors_descendants = {
+        ancestor: nx.descendants(graph_without_node, ancestor) for ancestor in ancestors
     }
     to_remove = []
-    for ancestor, successors in ancestors_successors.items():
-        # If any successor does not have node as descendant we must keep the node
-        if all(nx.has_path(graph, successor, node) for successor in successors):
+    for ancestor, descendants in ancestors_descendants.items():
+        if descendants.issubset(ancestors):
             to_remove.append(ancestor)
+    graph = graph.copy()
     graph.remove_nodes_from(to_remove)
     graph.remove_edges_from(list(graph.in_edges(node)))
     return graph

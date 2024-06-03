@@ -615,6 +615,29 @@ def test_setitem_raises_on_conflicting_input_nodes_in_ancestor() -> None:
     with pytest.raises(ValueError, match="Node inputs differ for node 'b'"):
         graph['x'] = cb.Graph(g2)
 
+def test_setitem_replaces_nodes_that_are_not_ancestors_of_unrelated_node() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')
+    g1.add_edge('b', 'c')
+    g1.add_edge('c', 'd')
+    graph = cb.Graph(g1)
+    g2 = nx.DiGraph()
+    g2.add_edge('b', 'c')
+    graph['c'] = cb.Graph(g2)
+
+
+
+def test_setitem_preserves_nodes_that_are_ancestors_of_unrelated_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.add_edge('b', 'd')
+    g.add_edge('c', 'd')
+    graph = cb.Graph(g)
+    graph['c'] = graph['c']
+    assert 'a' in graph.to_networkx()
+
+
 
 def test_getitem_returns_graph_containing_only_key_and_ancestors() -> None:
     g = nx.DiGraph()
