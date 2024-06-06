@@ -33,13 +33,11 @@ def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
     # Considering the graph we obtain by removing `node`, we need to consider the
     # descendants of each ancestor. If an ancestor has descendants that are not
     # removal candidates, we should not remove the ancestor.
-    ancestors_descendants = {
-        ancestor: nx.descendants(graph_without_node, ancestor) for ancestor in ancestors
-    }
-    to_remove = []
-    for ancestor, descendants in ancestors_descendants.items():
-        if descendants.issubset(ancestors):
-            to_remove.append(ancestor)
+    to_remove = [
+        ancestor
+        for ancestor in ancestors
+        if nx.descendants(graph_without_node, ancestor).issubset(ancestors)
+    ]
     graph = graph.copy()
     graph.remove_nodes_from(to_remove)
     graph.remove_edges_from(list(graph.in_edges(node)))
