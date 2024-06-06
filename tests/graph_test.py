@@ -735,15 +735,67 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
 
 def test_setitem_currently_does_not_allow_compatible_indices() -> None:
     g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('c', 'd')
+
+    graph = cb.Graph(g)
+    mapped1 = graph.map({'a': [1, 2, 3]})
+    mapped2 = graph['d'].map({'c': [11, 12, 13]}).reduce('d', name='e')
+    # Note: This is a limitation of the current implementation. We could check if the
+    # indices are identical and allow this. For simplicity we currently do not.
+    with pytest.raises(ValueError, match="Conflicting new index names"):
+        mapped1['x'] = mapped2
+
+
+@pytest.mark.parametrize(
+    'node_values',
+    [
+        {'a': [1, 2, 3], 'b': [11, 12, 13]},
+        {'a': np.array([1, 2, 3]), 'b': np.array([11, 12, 13])},
+        pd.DataFrame({'a': [1, 2, 3], 'b': [11, 12, 13]}),
+        {
+            'a': sc.array(dims=['x'], values=[1, 2, 3]),
+            'b': sc.array(dims=['x'], values=[11, 12, 13]),
+        },
+        {
+            'a': xr.DataArray(dims=('x',), data=[1, 2, 3]),
+            'b': xr.DataArray(dims=('x',), data=[11, 12, 13]),
+        },
+    ],
+)
+def test_setitem_allows_compatible_node_values(node_values) -> None:
+    g = nx.DiGraph()
     g.add_edge('a', 'c')
     g.add_edge('b', 'c')
 
     graph = cb.Graph(g)
-    mapped = graph.map({'a': [1, 2, 3], 'b': [11, 12, 13]}).reduce('c', name='d')
-    # Note: This is a limitation of the current implementation. We could check if the
-    # indices are identical and allow this. For simplicity we currently do not.
+    mapped = graph.map(node_values).reduce('c', name='d')
+    mapped['x'] = mapped['d']
+    assert len(mapped.index_names) == 1
+
+
+def test_setitem_raises_if_node_values_equivalent_but_of_different_type() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    graph = cb.Graph(g)
+    mapped1 = graph.map({'a': [1, 2]}).reduce('b', name='d')
+    mapped2 = graph.map({'a': np.array([1, 2])}).reduce('b', name='d')
+    # One could imagine treating this as equivalent, but we are strict in the
+    # comparison.
     with pytest.raises(ValueError, match="Conflicting new index names"):
-        mapped['x'] = mapped['d']
+        mapped1['x'] = mapped2['d']
+
+
+def test_setitem_raises_if_node_values_incompatible() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    graph = cb.Graph(g)
+    mapped1 = graph.map({'a': [1, 2]}).reduce('b', name='d')
+    mapped2 = graph.map({'a': sc.array(dims=('x',), values=[1, 2])}).reduce(
+        'b', name='d'
+    )
+    with pytest.raises(ValueError, match="has already been mapped"):
+        mapped1['x'] = mapped2['d']
 
 
 def test_setitem_does_currently_not_support_slice_assignment() -> None:
