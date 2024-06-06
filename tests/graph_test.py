@@ -625,6 +625,7 @@ def test_setitem_replaces_nodes_that_are_not_ancestors_of_unrelated_node() -> No
     g2 = nx.DiGraph()
     g2.add_edge('b', 'c')
     graph['c'] = cb.Graph(g2)
+    assert 'a' not in graph.to_networkx()
 
 
 def test_setitem_preserves_nodes_that_are_ancestors_of_unrelated_node() -> None:
@@ -635,7 +636,7 @@ def test_setitem_preserves_nodes_that_are_ancestors_of_unrelated_node() -> None:
     g.add_edge('c', 'd')
     graph = cb.Graph(g)
     graph['c'] = graph['c']
-    assert 'a' in graph.to_networkx()
+    nx.utils.graphs_equal(graph.to_networkx(), g)
 
 
 def test_getitem_returns_graph_containing_only_key_and_ancestors() -> None:
