@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2023 Scipp contributors (https://github.com/scipp)
-from typing import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 
 import networkx as nx
 import numpy as np
@@ -362,7 +362,7 @@ def test_map_with_previously_mapped_index_name_raises() -> None:
     values = sc.arange('x', 3)
 
     mapped = graph.map({'a': values})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Conflicting new index names"):
         mapped.map({'b': values})
 
 
@@ -441,7 +441,7 @@ def test_reduce_raises_if_axis_or_does_not_exist(indexer) -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': sc.arange('x', 3)})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="does not have"):
         mapped.reduce(name='combine', **indexer)
 
 
@@ -498,8 +498,8 @@ def test_can_reduce_same_node_multiple_times() -> None:
     reduced = mapped.reduce('b', name='c1', axis=0).reduce('b', name='c2', axis=0)
     result = reduced.to_networkx()
     assert len(result.nodes) == 3 + 3 + 1 + 1
-    c1_parents = [n for n in result.predecessors('c1')]
-    c2_parents = [n for n in result.predecessors('c2')]
+    c1_parents = list(result.predecessors('c1'))
+    c2_parents = list(result.predecessors('c2'))
     assert c1_parents == c2_parents
 
 
@@ -525,19 +525,19 @@ def test_can_reduce_different_axes_or_indices_of_same_node() -> None:
     reduced = reduced.to_networkx()
 
     assert len(reduced.nodes) == 9 + 9 + 4 * 3
-    c0s = [n for n in helper.predecessors('d0')]
-    c1s = [n for n in helper.predecessors('d1')]
-    cxs = [n for n in helper.predecessors('dx')]
-    cys = [n for n in helper.predecessors('dy')]
+    c0s = list(helper.predecessors('d0'))
+    c1s = list(helper.predecessors('d1'))
+    cxs = list(helper.predecessors('dx'))
+    cys = list(helper.predecessors('dy'))
 
-    for c0, cx in zip(c0s, cxs):
-        c0_parents = [n for n in reduced.predecessors(c0)]
-        cx_parents = [n for n in reduced.predecessors(cx)]
+    for c0, cx in zip(c0s, cxs, strict=True):
+        c0_parents = list(reduced.predecessors(c0))
+        cx_parents = list(reduced.predecessors(cx))
         assert c0_parents == cx_parents
 
-    for c1, cy in zip(c1s, cys):
-        c1_parents = [n for n in reduced.predecessors(c1)]
-        cy_parents = [n for n in reduced.predecessors(cy)]
+    for c1, cy in zip(c1s, cys, strict=True):
+        c1_parents = list(reduced.predecessors(c1))
+        cy_parents = list(reduced.predecessors(cy))
         assert c1_parents == cy_parents
 
 
@@ -616,6 +616,29 @@ def test_setitem_raises_on_conflicting_input_nodes_in_ancestor() -> None:
         graph['x'] = cb.Graph(g2)
 
 
+def test_setitem_replaces_nodes_that_are_not_ancestors_of_unrelated_node() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')
+    g1.add_edge('b', 'c')
+    g1.add_edge('c', 'd')
+    graph = cb.Graph(g1)
+    g2 = nx.DiGraph()
+    g2.add_edge('b', 'c')
+    graph['c'] = cb.Graph(g2)
+    assert 'a' not in graph.to_networkx()
+
+
+def test_setitem_preserves_nodes_that_are_ancestors_of_unrelated_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.add_edge('b', 'd')
+    g.add_edge('c', 'd')
+    graph = cb.Graph(g)
+    graph['c'] = graph['c']
+    nx.utils.graphs_equal(graph.to_networkx(), g)
+
+
 def test_getitem_returns_graph_containing_only_key_and_ancestors() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
@@ -668,7 +691,7 @@ def test_getitem_keeps_only_relevant_node_values() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
     # This fails due to existing mapping...
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='has already been mapped'):
         mapped.map({'a': [1, 2]})
     # ... but getitem drops the 'a' mapping, so we can map 'a' again:
     mapped['b'].map({'a': [1, 2]})

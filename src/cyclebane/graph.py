@@ -2,8 +2,9 @@
 # Copyright (c) 2024 Scipp contributors (https://github.com/scipp)
 from __future__ import annotations
 
+from collections.abc import Generator, Hashable, Iterable
 from dataclasses import dataclass
-from typing import Any, Generator, Hashable, Iterable
+from typing import Any
 from uuid import uuid4
 
 import networkx as nx
@@ -26,16 +27,18 @@ def _get_new_node_name(graph: nx.DiGraph) -> str:
 
 
 def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
-    graph = graph.copy()
+    graph_without_node = graph.copy()
+    graph_without_node.remove_node(node)
     ancestors = nx.ancestors(graph, node)
-    ancestors_successors = {
-        ancestor: graph.successors(ancestor) for ancestor in ancestors
-    }
-    to_remove = []
-    for ancestor, successors in ancestors_successors.items():
-        # If any successor does not have node as descendant we must keep the node
-        if all(nx.has_path(graph, successor, node) for successor in successors):
-            to_remove.append(ancestor)
+    # Considering the graph we obtain by removing `node`, we need to consider the
+    # descendants of each ancestor. If an ancestor has descendants that are not
+    # removal candidates, we should not remove the ancestor.
+    to_remove = [
+        ancestor
+        for ancestor in ancestors
+        if nx.descendants(graph_without_node, ancestor).issubset(ancestors)
+    ]
+    graph = graph.copy()
     graph.remove_nodes_from(to_remove)
     graph.remove_edges_from(list(graph.in_edges(node)))
     return graph
@@ -59,7 +62,7 @@ class IndexValues:
         return IndexValues(axes=names, values=values)
 
     def to_tuple(self) -> tuple[tuple[IndexName, IndexValue], ...]:
-        return tuple(zip(self.axes, self.values))
+        return tuple(zip(self.axes, self.values, strict=True))
 
     def merge_index(self, other: IndexValues) -> IndexValues:
         return IndexValues(
@@ -68,7 +71,8 @@ class IndexValues:
 
     def __str__(self) -> str:
         return ', '.join(
-            f'{name}={value}' for name, value in zip(self.axes, self.values)
+            f'{name}={value}'
+            for name, value in zip(self.axes, self.values, strict=True)
         )
 
     def __len__(self) -> int:
@@ -139,7 +143,7 @@ def _rename_successors(
 
 
 def _yield_index(
-    indices: list[tuple[IndexName, Iterable[IndexValue]]]
+    indices: list[tuple[IndexName, Iterable[IndexValue]]],
 ) -> Generator[tuple[tuple[IndexName, IndexValue], ...], None, None]:
     """Given a multi-dimensional index, yield all possible combinations."""
     name, index = indices[0]
@@ -148,7 +152,7 @@ def _yield_index(
             yield ((name, index_value),)
         else:
             for rest in _yield_index(indices[1:]):
-                yield ((name, index_value),) + rest
+                yield ((name, index_value), *rest)
 
 
 class PositionalIndexer:
@@ -364,12 +368,12 @@ class Graph:
         graph = self.graph
         for index_name, index in reversed(self.indices.items()):
             # Find all nodes with this index
-            nodes = []
-            for node in graph.nodes():
-                if index_name in _node_indices(
-                    node.name if isinstance(node, NodeName) else node
-                ):
-                    nodes.append(node)
+            nodes = [
+                node
+                for node in graph.nodes()
+                if index_name
+                in _node_indices(node.name if isinstance(node, NodeName) else node)
+            ]
             # Make a copy for each index value
             graphs = [
                 _rename_successors(
@@ -409,7 +413,7 @@ class Graph:
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
         # Drop all node values that are not in the branch
-        mapped = set(a.name for a in ancestors if isinstance(a, MappedNode))
+        mapped = {a.name for a in ancestors if isinstance(a, MappedNode)}
         keep_values = [key for key in self._node_values.keys() if key in mapped]
         return Graph(
             self.graph.subgraph(ancestors),
