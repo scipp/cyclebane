@@ -49,8 +49,8 @@ class ValueArray(ABC):
     def try_from(obj: Any, *, axis_zero: int = 0) -> ValueArray | None: ...
 
     def __eq__(self, other: object) -> bool:
-        if type(self) != type(other):
-            return False
+        if type(self) is not type(other):
+            return NotImplemented
         return self._equal(other)
 
     def __ne__(self, other: object) -> bool:
