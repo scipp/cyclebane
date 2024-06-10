@@ -750,13 +750,18 @@ def test_setitem_currently_does_not_allow_compatible_indices() -> None:
 @pytest.mark.parametrize(
     'node_values',
     [
+        {'a': [1, 2, 3]},
         {'a': [1, 2, 3], 'b': [11, 12, 13]},
+        {'a': np.array([1, 2, 3])},
         {'a': np.array([1, 2, 3]), 'b': np.array([11, 12, 13])},
+        pd.DataFrame({'a': [1, 2, 3]}),
         pd.DataFrame({'a': [1, 2, 3], 'b': [11, 12, 13]}),
+        {'a': sc.array(dims=['x'], values=[1, 2, 3])},
         {
             'a': sc.array(dims=['x'], values=[1, 2, 3]),
             'b': sc.array(dims=['x'], values=[11, 12, 13]),
         },
+        {'a': xr.DataArray(dims=('x',), data=[1, 2, 3])},
         {
             'a': xr.DataArray(dims=('x',), data=[1, 2, 3]),
             'b': xr.DataArray(dims=('x',), data=[11, 12, 13]),
