@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Hashable, Iterable, Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 if TYPE_CHECKING:
     import numpy
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
 
 IndexName = Hashable
 IndexValue = Hashable
+
+T = TypeVar('T', bound='ValueArray')
 
 
 class ValueArray(ABC):
@@ -44,6 +47,17 @@ class ValueArray(ABC):
     @staticmethod
     @abstractmethod
     def try_from(obj: Any, *, axis_zero: int = 0) -> ValueArray | None: ...
+
+    def __eq__(self, other: object) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented
+        return self._equal(other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self == other
+
+    @abstractmethod
+    def _equal(self: T, other: T) -> bool: ...
 
     @abstractmethod
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
@@ -94,6 +108,13 @@ class SequenceAdapter(ValueArray):
     def try_from(obj: Any, *, axis_zero: int = 0) -> SequenceAdapter | None:
         return SequenceAdapter(obj, axis_zero=axis_zero)
 
+    def _equal(self, other: SequenceAdapter) -> bool:
+        return (
+            self._values == other._values
+            and self._index == other._index
+            and self._axis_zero == other._axis_zero
+        )
+
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
             raise ValueError('SequenceAdapter only supports single index')
@@ -132,6 +153,11 @@ class PandasSeriesAdapter(ValueArray):
             return None
         if isinstance(obj, pandas.Series):
             return PandasSeriesAdapter(obj, axis_zero=axis_zero)
+
+    def _equal(self, other: PandasSeriesAdapter) -> bool:
+        return (
+            self._series.equals(other._series) and self._axis_zero == other._axis_zero
+        )
 
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         if len(key) != 1:
@@ -188,6 +214,9 @@ class XarrayDataArrayAdapter(ValueArray):
         except ModuleNotFoundError:
             pass
 
+    def _equal(self, other: XarrayDataArrayAdapter) -> bool:
+        return self._data_array.identical(other._data_array)
+
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         return self._data_array.sel(dict(key))
 
@@ -210,15 +239,14 @@ class XarrayDataArrayAdapter(ValueArray):
 
 
 class ScippDataArrayAdapter(ValueArray):
-    def __init__(self, data_array: scipp.DataArray):
-        import scipp
-
+    def __init__(self, data_array: scipp.DataArray, scipp: ModuleType):
         default_indices = {
             dim: scipp.arange(dim, size, unit=None)
             for dim, size in data_array.sizes.items()
             if dim not in data_array.coords
         }
         self._data_array = data_array.assign_coords(default_indices)
+        self._scipp = scipp
 
     @staticmethod
     def try_from(obj: Any, *, axis_zero: int = 0) -> ScippDataArrayAdapter | None:
@@ -226,15 +254,16 @@ class ScippDataArrayAdapter(ValueArray):
             import scipp
 
             if isinstance(obj, scipp.Variable):
-                return ScippDataArrayAdapter(scipp.DataArray(obj))
+                return ScippDataArrayAdapter(scipp.DataArray(obj), scipp=scipp)
             if isinstance(obj, scipp.DataArray):
-                return ScippDataArrayAdapter(obj)
+                return ScippDataArrayAdapter(obj, scipp=scipp)
         except ModuleNotFoundError:
             pass
 
-    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
-        import scipp
+    def _equal(self, other: ScippDataArrayAdapter) -> bool:
+        return self._scipp.identical(self._data_array, other._data_array)
 
+    def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         values = self._data_array
         for dim, value in key:
             # Reconstruct label, to use label-based indexing instead of positional
@@ -242,7 +271,7 @@ class ScippDataArrayAdapter(ValueArray):
                 value, unit = value
             else:
                 unit = None
-            label = scipp.scalar(value, unit=unit)
+            label = self._scipp.scalar(value, unit=unit)
             # Scipp indexing uses a comma to separate dimension label from the index,
             # unlike Numpy and other libraries where it separates the indices for
             # different axes.
@@ -253,7 +282,7 @@ class ScippDataArrayAdapter(ValueArray):
         values = self._data_array
         for dim, i in key:
             values = values[dim, i]
-        return ScippDataArrayAdapter(values)
+        return ScippDataArrayAdapter(values, scipp=self._scipp)
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -306,6 +335,13 @@ class NumpyArrayAdapter(ValueArray):
             return None
         if isinstance(obj, numpy.ndarray):
             return NumpyArrayAdapter(obj, axis_zero=axis_zero)
+
+    def _equal(self, other: NumpyArrayAdapter) -> bool:
+        return (
+            (self._array == other._array).all()
+            and self._indices == other._indices
+            and self._axis_zero == other._axis_zero
+        )
 
     def sel(self, key: tuple[tuple[IndexName, IndexValue], ...]) -> Any:
         index_tuple = tuple(self._indices[k].index(i) for k, i in key)
@@ -374,6 +410,11 @@ class NodeValues(Mapping[Hashable, ValueArray]):
         return NodeValues(value_arrays)
 
     def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
+        value_arrays = {
+            key: value
+            for key, value in value_arrays.items()
+            if self.get(key, None) != value
+        }
         if value_arrays:
             named = next(iter(value_arrays.values())).index_names
             if any(name in self.indices for name in named):
