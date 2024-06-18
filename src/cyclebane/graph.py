@@ -2,7 +2,7 @@
 # Copyright (c) 2024 Scipp contributors (https://github.com/scipp)
 from __future__ import annotations
 
-from collections.abc import Generator, Hashable, Iterable
+from collections.abc import Hashable, Iterable
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -54,12 +54,6 @@ class IndexValues:
 
     axes: tuple[IndexName, ...]
     values: tuple[IndexValue, ...]
-
-    @staticmethod
-    def from_tuple(t: tuple[tuple[IndexName, IndexValue], ...]) -> IndexValues:
-        names = tuple(name for name, _ in t)
-        values = tuple(value for _, value in t)
-        return IndexValues(axes=names, values=values)
 
     def to_tuple(self) -> tuple[tuple[IndexName, IndexValue], ...]:
         return tuple(zip(self.axes, self.values, strict=True))
@@ -140,19 +134,6 @@ def _rename_successors(
         for node in successors
     }
     return nx.relabel_nodes(graph, renamed_nodes, copy=True)
-
-
-def _yield_index(
-    indices: list[tuple[IndexName, Iterable[IndexValue]]],
-) -> Generator[tuple[tuple[IndexName, IndexValue], ...], None, None]:
-    """Given a multi-dimensional index, yield all possible combinations."""
-    name, index = indices[0]
-    for index_value in index:
-        if len(indices) == 1:
-            yield ((name, index_value),)
-        else:
-            for rest in _yield_index(indices[1:]):
-                yield ((name, index_value), *rest)
 
 
 class PositionalIndexer:
@@ -377,9 +358,9 @@ class Graph:
             # Make a copy for each index value
             graphs = [
                 _rename_successors(
-                    graph, successors=nodes, index=IndexValues.from_tuple(i)
+                    graph, successors=nodes, index=IndexValues((index_name,), (i,))
                 )
-                for i in _yield_index([(index_name, index)])
+                for i in index
             ]
             graph = nx.compose_all(graphs)
         # Replace all MappingNodes with their name
