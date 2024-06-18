@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: 9bb9876
+_commit: 556a471
 _src_path: gh:scipp/copier_template
 description: Transform directed acyclic graphs using map-reduce and groupby operations
 max_python: '3.12'
