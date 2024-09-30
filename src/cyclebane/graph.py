@@ -430,7 +430,10 @@ class Graph:
         intersection_nodes = set(graph.nodes) & set(new_branch.nodes) - {branch}
 
         for node in intersection_nodes:
-            if graph.pred[node] != new_branch.pred[node]:
+            # Missing ancestors in `new_branch` will be filled in from `graph`.
+            new_pred = new_branch.pred[node]
+            old_pred = {k: v for k, v in graph.pred[node].items() if k in new_pred}
+            if old_pred != new_pred:
                 raise ValueError(
                     f"Node inputs differ for node '{node}':\n"
                     f"  {graph.pred[node]}\n"

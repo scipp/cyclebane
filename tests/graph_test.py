@@ -639,6 +639,51 @@ def test_setitem_preserves_nodes_that_are_ancestors_of_unrelated_node() -> None:
     nx.utils.graphs_equal(graph.to_networkx(), g)
 
 
+def test_setitem_inserts_graph_with_missing_parent() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')
+    g1.add_edge('n', 'c')
+    g2 = nx.DiGraph()
+    g2.add_edge('b', 'n')
+
+    graph = cb.Graph(g1)
+    graph['n'] = cb.Graph(g2)
+    expected = g1.copy()
+    expected.add_edge('b', 'n')
+    nx.utils.graphs_equal(graph.to_networkx(), expected)
+
+
+def test_setitem_inserts_graph_with_missing_and_matching_parent() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')
+    g1.add_edge('e', 'b')
+    g1.add_edge('n', 'c')
+    g2 = nx.DiGraph()
+    g2.add_edge('b', 'n')
+    g2.add_edge('e', 'b')
+
+    graph = cb.Graph(g1)
+    graph['n'] = cb.Graph(g2)
+    expected = g1.copy()
+    expected.add_edge('b', 'n')
+    nx.utils.graphs_equal(graph.to_networkx(), expected)
+
+
+def test_setitem_fails_with_partial_parent_mismatch() -> None:
+    g1 = nx.DiGraph()
+    g1.add_edge('a', 'b')  # only in g1
+    g1.add_edge('e', 'b')  # in both graphs
+    g1.add_edge('n', 'c')
+    g2 = nx.DiGraph()
+    g2.add_edge('b', 'n')
+    g2.add_edge('e', 'b')  # in both graphs
+    g2.add_edge('x', 'b')  # only in g2
+
+    graph = cb.Graph(g1)
+    with pytest.raises(ValueError, match="Node inputs differ for node 'b'"):
+        graph['n'] = cb.Graph(g2)
+
+
 def test_getitem_returns_graph_containing_only_key_and_ancestors() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
