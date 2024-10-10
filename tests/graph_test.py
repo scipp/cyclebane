@@ -558,6 +558,61 @@ def test_axis_in_reduce_refers_to_node_axis_not_graph_axis() -> None:
     assert all(n.index.axes == ('y',) for n in d_nodes)
 
 
+def test_delitem_removes_ancestors_and_data_but_keeps_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.add_node('b', value='x')
+
+    graph = cb.Graph(g)
+    del graph['b']
+    result = graph.to_networkx()
+    assert list(result.nodes) == ['b', 'c']
+    assert result.nodes['b'] == {}
+
+
+def test_delitem_preserves_ancestors_with_other_path_to_graph() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.add_node('b', value='x')
+    # a has another path to c so it will we kept
+    g.add_edge('a', 'c')
+
+    graph = cb.Graph(g)
+    del graph['b']
+    result = graph.to_networkx()
+    assert list(result.nodes) == ['a', 'b', 'c']
+    assert result.nodes['b'] == {}
+    assert not result.has_edge('a', 'b')
+
+
+def test_delitem_raises_when_removing_mapped_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.add_node('b', value='x')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    with pytest.raises(ValueError, match="Cannot delete mapped node."):
+        del mapped['b']
+
+
+def test_delitem_can_remove_reduced_node_depending_on_mapped_nodes() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('x', 'y')  # unrelated
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]}).reduce('b', name='c')
+
+    del mapped['c']
+
+    result = mapped.to_networkx()
+    assert set(result.nodes) == {'x', 'y', 'c'}
+    assert result.nodes['c'] == {}
+
+
 def test_setitem_raises_TypeError_if_given_networkx_graph() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
