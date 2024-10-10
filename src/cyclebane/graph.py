@@ -401,6 +401,24 @@ class Graph:
             node_values=self._node_values.get_columns(keep_values),
         )
 
+    def __delitem__(self, key: Hashable | slice) -> None:
+        """
+        Delete the branch of the graph rooted at the given node.
+        """
+        if isinstance(key, slice):
+            raise NotImplementedError('Only single nodes are supported ')
+        key = self._from_orig_key(key)
+        if isinstance(key, MappedNode):
+            # Not clear what to do in this case, as it would leave a lot of MappedNodes
+            # without a source that could provide data.
+            raise ValueError('Cannot delete mapped node.')
+        graph = _remove_ancestors(self.graph, key)
+        graph.nodes[key].clear()
+        mapped = {node.name for node in graph if isinstance(node, MappedNode)}
+        keep_values = [key for key in self._node_values.keys() if key in mapped]
+        self._node_values = self._node_values.get_columns(keep_values)
+        self.graph = graph
+
     def __setitem__(self, branch: Hashable | slice, other: Graph) -> None:
         """
         Set a new branch in place of the given branch.
