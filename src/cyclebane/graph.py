@@ -448,7 +448,8 @@ class Graph:
         intersection_nodes = set(graph.nodes) & set(new_branch.nodes) - {branch}
 
         for node in intersection_nodes:
-            if graph.pred[node] != new_branch.pred[node]:
+            new_pred = new_branch.pred[node]
+            if new_pred and graph.pred[node] != new_pred:
                 raise ValueError(
                     f"Node inputs differ for node '{node}':\n"
                     f"  {graph.pred[node]}\n"
