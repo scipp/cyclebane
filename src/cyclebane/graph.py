@@ -27,9 +27,16 @@ def _get_new_node_name(graph: nx.DiGraph) -> str:
 
 
 def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
+    """
+    Returns a copy of the graph without the ancestors of the given node.
+
+    Warning: Returns the original graph if the node has no data and ancestors.
+    """
+    ancestors = nx.ancestors(graph, node)
+    if not ancestors and not graph.nodes[node]:
+        return graph
     graph_without_node = graph.copy()
     graph_without_node.remove_node(node)
-    ancestors = nx.ancestors(graph, node)
     # Considering the graph we obtain by removing `node`, we need to consider the
     # descendants of each ancestor. If an ancestor has descendants that are not
     # removal candidates, we should not remove the ancestor.
