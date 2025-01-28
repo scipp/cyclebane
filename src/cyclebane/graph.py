@@ -27,9 +27,16 @@ def _get_new_node_name(graph: nx.DiGraph) -> str:
 
 
 def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
+    """
+    Returns a copy of the graph without the ancestors of the given node.
+
+    Warning: Returns the original graph if the node has no data and ancestors.
+    """
+    ancestors = nx.ancestors(graph, node)
+    if not ancestors and not graph.nodes[node]:
+        return graph
     graph_without_node = graph.copy()
     graph_without_node.remove_node(node)
-    ancestors = nx.ancestors(graph, node)
     # Considering the graph we obtain by removing `node`, we need to consider the
     # descendants of each ancestor. If an ancestor has descendants that are not
     # removal candidates, we should not remove the ancestor.
@@ -41,6 +48,7 @@ def _remove_ancestors(graph: nx.DiGraph, node: Hashable) -> nx.DiGraph:
     graph = graph.copy()
     graph.remove_nodes_from(to_remove)
     graph.remove_edges_from(list(graph.in_edges(node)))
+    graph.nodes[node].clear()
     return graph
 
 
@@ -413,7 +421,6 @@ class Graph:
             # without a source that could provide data.
             raise ValueError('Cannot delete mapped node.')
         graph = _remove_ancestors(self.graph, key)
-        graph.nodes[key].clear()
         mapped = {node.name for node in graph if isinstance(node, MappedNode)}
         keep_values = [key for key in self._node_values.keys() if key in mapped]
         self._node_values = self._node_values.get_columns(keep_values)
@@ -441,7 +448,6 @@ class Graph:
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
         if branch in self.graph:
             graph = _remove_ancestors(self.graph, branch)
-            graph.nodes[branch].clear()
         else:
             graph = self.graph
 
