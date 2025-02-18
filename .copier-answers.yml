@@ -5,7 +5,7 @@ description: Transform directed acyclic graphs using map-reduce and groupby oper
 max_python: '3.13'
 min_python: '3.10'
 namespace_package: ''
-nightly_deps: networkx/networkx
+nightly_deps: ''
 orgname: scipp
 prettyname: Cyclebane
 projectname: cyclebane
