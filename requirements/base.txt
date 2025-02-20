@@ -5,5 +5,5 @@
 #
 #    pip-compile-multi
 #
-networkx==3.2.1
+networkx==3.4.2
     # via -r base.in
