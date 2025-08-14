@@ -391,6 +391,15 @@ class Graph:
                     self._clone_graph(graph_for_material, inner_index_name, inner_index)
                     for inner_index, graph_for_material in zip(index.values(), graphs)
                 ]
+                # graphs[Si]: [(e[Si],h[Si]), (e[Si],h[Si])]
+                # graphs[Ge]: [(e[Ge],h[Ge])]
+
+                # graphs[Si]: [(d[s1],f[Si]), (d[s3],f[Si])]
+                # graphs[Ge]: [(d[s2],f[Ge])]
+
+                # graphs[Si]: [(g[s1],j), (g[s3],j)]
+                # graphs[Ge]: [(g[s2],j)]
+
                 # No! We don't need grouped node, maybe? There is no compute for it!
                 # Final node names should be (at the grouped but not reduced node):
                 # Note: May want to flatten the list

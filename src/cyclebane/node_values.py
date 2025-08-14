@@ -427,6 +427,12 @@ class NodeValues(Mapping[Hashable, ValueArray]):
         values: Mapping[Hashable, Sequence[Any]], axis_zero: int
     ) -> NodeValues:
         """Construct from a mapping of node names to value sequences."""
+        # graph.map(param_table)
+        #   {sample: [s1,s2,s3], material: [Si,Ge,Si], param: [p1,p2,p3]}
+        # graph.groupby(material)
+        # -> merge two indices into multi-index
+        #   {material: {Si: {sample:[s1,s3]}, Ge: {sample:[s2]}}
+        #   {material: {Si: {sample:[s1,s3], param:[p1,p3]}, Ge: {sample:[s2], param:[p2]}}
         value_arrays = {
             key: ValueArray.from_array_like(value, axis_zero=axis_zero)
             for key, value in values.items()
