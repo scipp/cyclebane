@@ -726,6 +726,69 @@ def test_getitem_setitem_with_no_effects() -> None:
     # because the check for compatible indices/node-values is not implemented.
 
 
+def test_getitem_setitem_with_no_effects_on_mapped_graph() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['attr'] = 1
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+
+    # This should have no effect on the mapped graph
+    mapped['b'] = mapped['b']
+
+    result = mapped.to_networkx()
+
+    # Verify the mapping is preserved
+    assert result.nodes[idx('a', 0)] == {'attr': 1, 'value': 1}
+    assert result.nodes[idx('a', 1)] == {'attr': 1, 'value': 2}
+    assert result.nodes[idx('a', 2)] == {'attr': 1, 'value': 3}
+
+    # Verify all mapped nodes are still present
+    assert len([n for n in result.nodes if n.name == 'a']) == 3
+    assert len([n for n in result.nodes if n.name == 'b']) == 3
+    assert len([n for n in result.nodes if n.name == 'c']) == 3
+
+
+def test_mapped_getitem_setitem_shrinking_graph() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['attr'] = 1
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+
+    # This should make a graph with 2 nodes per mapped value
+    mapped['c'] = mapped['b']
+
+    result = mapped.to_networkx()
+    assert len(result.nodes) == 2 * 3
+
+    # Verify the mapping is preserved
+    assert result.nodes[idx('a', 0)] == {'attr': 1, 'value': 1}
+    assert result.nodes[idx('a', 1)] == {'attr': 1, 'value': 2}
+    assert result.nodes[idx('a', 2)] == {'attr': 1, 'value': 3}
+
+    # Verify all mapped nodes are still present, but b was removed
+    assert len([n for n in result.nodes if n.name == 'a']) == 3
+    assert len([n for n in result.nodes if n.name == 'c']) == 3
+
+
+def test_setitem_mapped_on_mapped_raises_on_incompatible_mapped_value() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    # TODO We need to fix this exception, all compatible indices! Should still raise,
+    # but a different one about index length or values.
+    with pytest.raises(ValueError, match="Conflicting new index names"):
+        mapped['b'] = cb.Graph(nx.DiGraph()).map({'a': [4, 5]})
+
+
 def test_getitem_keeps_only_relevant_indices() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')

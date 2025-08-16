@@ -441,10 +441,15 @@ class Graph:
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
-        # In the future, we could support this if BOTH sink and branch are MappedNodes
-        # with identical indices.
-        if isinstance(sink, MappedNode) or isinstance(branch, MappedNode):
-            raise NotImplementedError('Mapped nodes not supported yet in __setitem__')
+        try:
+            branch = self._from_orig_key(branch)
+        except KeyError:
+            pass
+        if isinstance(sink, MappedNode) != isinstance(branch, MappedNode):
+            raise NotImplementedError(
+                'Trying to set mapped node on non-mapped node (or vice versa) is not '
+                'possible in __setitem__'
+            )
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
         if branch in self.graph:
             graph = _remove_ancestors(self.graph, branch)
