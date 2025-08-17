@@ -321,7 +321,7 @@ class NumpyArrayAdapter(ValueArray):
         self._array = np.asarray(array)
         if indices is None:
             indices = {
-                f'dim_{i+axis_zero}': range(size)
+                f'dim_{i + axis_zero}': range(size)
                 for i, size in enumerate(self._array.shape)
             }
         self._indices = indices
@@ -409,23 +409,37 @@ class NodeValues(Mapping[Hashable, ValueArray]):
             )
         return NodeValues(value_arrays)
 
-    def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
-        value_arrays = {
-            key: value
-            for key, value in value_arrays.items()
-            if self.get(key, None) != value
-        }
-        if value_arrays:
-            named = next(iter(value_arrays.values())).index_names
-            if any(name in self.indices for name in named):
+    def _add_value_array(self, key: Hashable, value_array: ValueArray) -> NodeValues:
+        """Add a single value array, checking for conflicts."""
+        # Check if the value array is identical to existing one
+        existing_value = self._values.get(key)
+        if existing_value is not None:
+            if existing_value == value_array:
+                return self  # No change needed
+            else:
+                raise ValueError(f"Node '{key}' has already been mapped")
+
+        # Check for index conflicts
+        existing_indices = self.indices
+        new_indices = value_array.indices
+        conflicting_names = set(new_indices.keys()) & set(existing_indices.keys())
+        for name in conflicting_names:
+            existing_index_values = list(existing_indices[name])
+            new_index_values = list(new_indices[name])
+            if existing_index_values != new_index_values:
                 raise ValueError(
-                    f'Conflicting new index names {named} with existing '
-                    f'{tuple(self.indices)}'
+                    f'Conflicting index values for index name "{name}" of {key}: '
+                    f'existing {existing_index_values} vs new {new_index_values}'
                 )
-        for node in value_arrays:
-            if node in self:
-                raise ValueError(f"Node '{node}' has already been mapped")
-        return NodeValues({**self._values, **value_arrays})
+
+        # Add the new value array
+        return NodeValues({**self._values, key: value_array})
+
+    def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
+        result = self
+        for key, value_array in value_arrays.items():
+            result = result._add_value_array(key, value_array)
+        return result
 
     def get_columns(self, keys: list[Hashable]) -> NodeValues:
         """Select a subset of columns."""
