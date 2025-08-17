@@ -392,30 +392,13 @@ class NodeValues(Mapping[Hashable, ValueArray]):
         """Return the column with the given name."""
         return self._values[key]
 
-    @staticmethod
-    def from_mapping(
-        values: Mapping[Hashable, Sequence[Any]], axis_zero: int
-    ) -> NodeValues:
-        """Construct from a mapping of node names to value sequences."""
-        value_arrays = {
-            key: ValueArray.from_array_like(value, axis_zero=axis_zero)
-            for key, value in values.items()
-        }
-        shapes = {array.shape for array in value_arrays.values()}
-        if len(shapes) > 1:
-            raise ValueError(
-                'All value sequences in a map operation must have the same shape. '
-                'Use multiple map operations if necessary.'
-            )
-        return NodeValues(value_arrays)
-
-    def _add_value_array(self, key: Hashable, value_array: ValueArray) -> NodeValues:
+    def __setitem__(self, key: Hashable, value_array: ValueArray) -> None:
         """Add a single value array, checking for conflicts."""
         # Check if the value array is identical to existing one
         existing_value = self._values.get(key)
         if existing_value is not None:
             if existing_value == value_array:
-                return self  # No change needed
+                return  # No change needed
             else:
                 raise ValueError(f"Node '{key}' has already been mapped")
 
@@ -433,12 +416,30 @@ class NodeValues(Mapping[Hashable, ValueArray]):
                 )
 
         # Add the new value array
-        return NodeValues({**self._values, key: value_array})
+        self._values[key] = value_array
+
+    @staticmethod
+    def from_mapping(
+        values: Mapping[Hashable, Sequence[Any]], axis_zero: int
+    ) -> NodeValues:
+        """Construct from a mapping of node names to value sequences."""
+        value_arrays = {
+            key: ValueArray.from_array_like(value, axis_zero=axis_zero)
+            for key, value in values.items()
+        }
+        shapes = {array.shape for array in value_arrays.values()}
+        if len(shapes) > 1:
+            raise ValueError(
+                'All value sequences in a map operation must have the same shape. '
+                'Use multiple map operations if necessary.'
+            )
+        return NodeValues(value_arrays)
 
     def merge(self, value_arrays: Mapping[Any, ValueArray]) -> NodeValues:
-        result = self
+        # Always create a copy
+        result = NodeValues(dict(self._values))
         for key, value_array in value_arrays.items():
-            result = result._add_value_array(key, value_array)
+            result[key] = value_array
         return result
 
     def get_columns(self, keys: list[Hashable]) -> NodeValues:

@@ -68,7 +68,8 @@ class TestNodeValuesMerge:
 
         merged = node_values.merge(new_values)
         assert len(merged) == 1
-        assert merged is node_values  # Should return same object
+        assert merged is not node_values  # Should return new object (copy)
+        assert merged['a'] is value_array  # But should contain same value array
 
     def test_merge_existing_node_equal_but_different_object(self):
         """Re-adding existing node with equal but different value object."""
@@ -80,7 +81,7 @@ class TestNodeValuesMerge:
 
         merged = node_values.merge(new_values)
         assert len(merged) == 1
-        assert merged is node_values  # Should return same object since values are equal
+        assert merged is not node_values  # Should return new object (copy)
 
     def test_merge_existing_node_different_value(self):
         """Re-adding existing node with different value."""
@@ -98,7 +99,9 @@ class TestNodeValuesMerge:
         node_values = NodeValues(initial_values)
 
         merged = node_values.merge({})
-        assert merged is node_values  # Should return same object
+        assert merged is not node_values  # Should return new object (copy)
+        assert len(merged) == 1
+        assert 'a' in merged
 
     def test_merge_empty_initial_values(self):
         """Merging into empty NodeValues."""
