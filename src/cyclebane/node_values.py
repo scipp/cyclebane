@@ -377,7 +377,7 @@ class NodeValues(Mapping[Hashable, ValueArray]):
     This is used by :py:class:`Graph` to store the values of nodes in a graph.
     """
 
-    def __init__(self, values: Mapping[Hashable, ValueArray]):
+    def __init__(self, values: Mapping[Any, ValueArray]):
         self._values = values
 
     def __len__(self) -> int:
@@ -435,7 +435,7 @@ class NodeValues(Mapping[Hashable, ValueArray]):
         # Add the new value array
         return NodeValues({**self._values, key: value_array})
 
-    def merge(self, value_arrays: Mapping[Hashable, ValueArray]) -> NodeValues:
+    def merge(self, value_arrays: Mapping[Any, ValueArray]) -> NodeValues:
         result = self
         for key, value_array in value_arrays.items():
             result = result._add_value_array(key, value_array)
