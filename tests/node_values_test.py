@@ -8,7 +8,70 @@ from cyclebane.node_values import NodeValues, ValueArray
 
 
 class TestNodeValues:
-    pass
+    def test_init_with_compatible_indices(self):
+        """Test that initialization succeeds with compatible indices."""
+        values = {
+            'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0),  # dim_0: [0,1,2]
+            'b': ValueArray.from_array_like([4, 5, 6], axis_zero=0),  # dim_0: [0,1,2]
+        }
+        node_values = NodeValues(values)
+        assert len(node_values) == 2
+        assert set(node_values.keys()) == {'a', 'b'}
+
+    def test_init_with_conflicting_indices(self):
+        """Test that initialization fails with conflicting indices."""
+        values = {
+            'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0),  # dim_0: [0,1,2]
+            'b': ValueArray.from_array_like([4, 5], axis_zero=0),  # dim_0: [0,1]
+        }
+        with pytest.raises(
+            ValueError, match='Conflicting index values for index name "dim_0"'
+        ):
+            NodeValues(values)
+
+    def test_init_with_different_index_names(self):
+        """Test that initialization succeeds with different index names."""
+        values = {
+            'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0),  # dim_0
+            'b': ValueArray.from_array_like([4, 5, 6], axis_zero=1),  # dim_1
+        }
+        node_values = NodeValues(values)
+        assert len(node_values) == 2
+        assert set(node_values.keys()) == {'a', 'b'}
+
+    def test_init_with_empty_values(self):
+        """Test that initialization succeeds with empty values."""
+        node_values = NodeValues({})
+        assert len(node_values) == 0
+
+    def test_init_with_xarray_conflicting_coords(self):
+        """Test that init fails with xarray DataArrays and conflicting coordinates."""
+        da1 = xr.DataArray([1, 2, 3], dims=['time'], coords={'time': [10, 20, 30]})
+        da2 = xr.DataArray([4, 5, 6], dims=['time'], coords={'time': [40, 50, 60]})
+
+        values = {
+            'sensor1': ValueArray.from_array_like(da1),
+            'sensor2': ValueArray.from_array_like(da2),
+        }
+
+        with pytest.raises(
+            ValueError, match='Conflicting index values for index name "time"'
+        ):
+            NodeValues(values)
+
+    def test_init_with_xarray_compatible_coords(self):
+        """Test that init succeeds with xarray DataArrays and compatible coords."""
+        da1 = xr.DataArray([1, 2, 3], dims=['time'], coords={'time': [10, 20, 30]})
+        da2 = xr.DataArray([4, 5, 6], dims=['time'], coords={'time': [10, 20, 30]})
+
+        values = {
+            'sensor1': ValueArray.from_array_like(da1),
+            'sensor2': ValueArray.from_array_like(da2),
+        }
+
+        node_values = NodeValues(values)
+        assert len(node_values) == 2
+        assert set(node_values.keys()) == {'sensor1', 'sensor2'}
 
 
 class TestNodeValuesMerge:

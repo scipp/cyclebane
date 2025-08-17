@@ -378,7 +378,11 @@ class NodeValues(Mapping[Hashable, ValueArray]):
     """
 
     def __init__(self, values: Mapping[Any, ValueArray]):
-        self._values = values
+        # Start with empty and use merge to validate compatibility
+        self._values = {}
+        if values:
+            merged = self.merge(values)
+            self._values = merged._values
 
     def __len__(self) -> int:
         """Return the number of columns."""
