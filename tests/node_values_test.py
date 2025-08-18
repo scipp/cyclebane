@@ -147,7 +147,7 @@ class TestNodeValuesMerge:
         assert len(merged) == 1
         assert merged is not node_values  # Should return new object (copy)
 
-    def test_merge_existing_node_different_value(self):
+    def test_merge_existing_node_different_value_raises(self):
         """Re-adding existing node with different value."""
         initial_values = {'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)}
         node_values = NodeValues(initial_values)
@@ -177,7 +177,7 @@ class TestNodeValuesMerge:
         assert len(merged) == 1
         assert 'a' in merged
 
-    def test_merge_multiple_new_nodes_mixed_conflicts(self):
+    def test_merge_multiple_new_nodes_mixed_conflicts_raises(self):
         """Multiple new nodes where some conflict and some don't."""
         initial_values = {'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)}
         node_values = NodeValues(initial_values)
@@ -194,7 +194,7 @@ class TestNodeValuesMerge:
         ):
             node_values.merge(new_values)
 
-    def test_merge_multiple_new_nodes_one_existing(self):
+    def test_merge_multiple_new_nodes_one_existing_raises(self):
         """Multiple new nodes where one already exists."""
         initial_values = {'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)}
         node_values = NodeValues(initial_values)
@@ -228,7 +228,7 @@ class TestNodeValuesMerge:
         assert len(merged) == 2
         assert set(merged.keys()) == {'data1', 'data2'}
 
-    def test_merge_partial_index_overlap_incompatible(self):
+    def test_merge_partial_index_overlap_incompatible_raises(self):
         """New nodes with partial index overlap that is incompatible."""
         # Initial: has 'time' and 'space' indices
         da1 = xr.DataArray(
