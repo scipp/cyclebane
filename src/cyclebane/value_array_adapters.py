@@ -159,6 +159,8 @@ class PandasSeriesAdapter(ValueArray):
 
     def group(self) -> PandasSeriesAdapter:
         groupby = self._series.groupby(self._series)
+
+        return groupby
         return PandasSeriesAdapter(
             groupby.apply(lambda x: x, include_groups=False),
             axis_zero=self._axis_zero,

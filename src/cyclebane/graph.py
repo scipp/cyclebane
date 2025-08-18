@@ -473,22 +473,26 @@ class Graph:
         #        {(Material, sample_dim): [Si,Si,Ge],
         #         (Material, material_dim): [Si,Ge]}
         # 3. Store grouping independently of NodeValues, they are unrelated.
-        subindex: Iterable[Iterable[IndexValue]] | None = None
+        subindex_name: IndexName | None = None
+        subindex: Iterable[Iterable[IndexValue]] = [[]]
+        groupings = getattr(self, '_groups', {})
         for index_name, index in reversed(self.indices.items()):
-            if subindex is None:
+            if index_name != subindex_name:
                 graphs = _clone_graph(graph, index_name, index)
             else:
                 # Note how `index` is unused in this branch, we assume it is represented
                 # by the subindex (but split by group).
                 graphs = [
                     _clone_graph(graph_for_group, index_name, inner_index)
-                    for inner_index, graph_for_group in zip(subindex, graphs)
+                    for inner_index, graph_for_group in zip(
+                        subindex, graphs, strict=True
+                    )
                 ]
                 # Flatten nested list of graphs
                 graphs = [g for sublist in graphs for g in sublist]
-            if isinstance(index, dict):
-                subindex = index.values()
+            if (grouping := groupings.get(index_name)) is not None:
                 # No compose, delayed until we made clones within each group
+                subindex_name, subindex = grouping
             else:
                 graph = nx.compose_all(graphs)
 
@@ -610,13 +614,19 @@ class GroupbyGraph:
     # TODO Should we support a custom new dim name here, instead of using `node`?
     def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
         graph = graph.copy()
-        node_values = node_values.copy()
         grouping = node_values[node]
         self._group_index_name = node
         self._index_name = grouping.index_names[0]
-        groups = grouping.group()
-        del node_values[node]  # Explicit since __setitem__ does not support replacing
-        node_values[node] = groups
+        groupby = grouping.group()
+        self._groups = groupby.groups
+        # Hack to get extra index
+        # Use tuple as key instead?
+        # If someone needs this, they can reduce explicitly?
+        # No, problem is merge with map over groups!
+        new_values = NodeValues.from_mapping({'xxxx': groupby.first()}, axis_zero=0)
+        node_values = node_values.merge(new_values)
+        # del node_values[node]  # Explicit since __setitem__ does not support replacing
+        # node_values[node] = groups
         # The grouping node becomes the new index name
         # TODO Add node after grouping? But would need to set value?
         # graph.add_node(_node_with_indices(node, (node,)))
@@ -649,6 +659,9 @@ class GroupbyGraph:
             attrs=attrs,
             _extra_index_name=self._group_index_name,
         )
+        graph._groups = {
+            self._group_index_name: (self._index_name, self._groups.values())
+        }
         return graph
 
 
