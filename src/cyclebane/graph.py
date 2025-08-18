@@ -265,6 +265,9 @@ class Graph:
             node_values=self._node_values.merge(new_values),
         )
 
+    def groupby(self, node: Hashable) -> GroupbyGraph:
+        return GroupbyGraph(self.graph, node_values=self._node_values, node=node)
+
     def reduce(
         self,
         key: None | Hashable = None,
@@ -273,6 +276,7 @@ class Graph:
         axis: None | int = None,
         name: None | Hashable = None,
         attrs: None | dict[str, Any] = None,
+        _extra_index_name: None | IndexName = None,
     ) -> Graph:
         """
         Reduce over the given index or axis previously created with :py:meth:`map`.
@@ -314,6 +318,11 @@ class Graph:
             new_index = tuple(value for i, value in enumerate(indices) if i != axis)
         else:
             new_index = None
+        if _extra_index_name is not None:
+            if new_index is None:
+                new_index = (_extra_index_name,)
+            else:
+                new_index = (*new_index, _extra_index_name)
         if name in self.graph:
             raise ValueError(f"Node '{name}' already exists in the graph.")
 
@@ -584,3 +593,54 @@ class Graph:
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
         self.graph = graph
+
+
+class GroupbyGraph:
+    """
+    A graph that has been grouped by a specific index.
+
+    This is a specialized graph that is used to represent the result of a groupby
+    operation on a Cyclebane graph. It allows for operations on the grouped data,
+    such as aggregation or summarization.
+    """
+
+    def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
+        graph = graph.copy()
+        node_values = node_values.copy()
+        groups = node_values[node].group()
+        self._group_index_name = node
+        self._index_name = groups.index_names[1]  # Group-internal index to reduce over
+        del node_values[node]  # Explicit since __setitem__ does not support replacing
+        node_values[node] = groups
+        # The grouping node becomes the new index name
+        # TODO Not strictly needed?
+        # graph.add_node(_node_with_indices(node, (node,)))
+        self._graph = Graph(graph, node_values=node_values)
+
+    def reduce(
+        self,
+        key: None | Hashable = None,
+        *,
+        name: None | Hashable = None,
+        attrs: None | dict[str, Any] = None,
+    ) -> Graph:
+        """
+        Reduce the grouped graph over the given index or axis.
+
+        Parameters
+        ----------
+        key:
+            The name of the source node to reduce. This is the original name prior to
+            mapping. If not given, tries to find a unique sink node.
+        name:
+            The name of the new node. If not given, a unique name is generated.
+        attrs:
+            Attributes to set on the new node(s).
+        """
+        return self._graph.reduce(
+            key=key,
+            index=self._index_name,
+            name=name,
+            attrs=attrs,
+            _extra_index_name=self._group_index_name,
+        )

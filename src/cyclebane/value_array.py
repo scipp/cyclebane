@@ -83,3 +83,14 @@ class ValueArray(ABC):
     @abstractmethod
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
         pass
+
+    def group(self) -> ValueArray:
+        """
+        Group the values by their indices.
+
+        This method is expected to return a new ValueArray that groups the values by
+        their indices, allowing for operations like aggregation or summarization.
+        """
+        raise NotImplementedError(
+            'ValueArray.group() is only implemented for Pandas series.'
+        )

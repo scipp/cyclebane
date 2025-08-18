@@ -144,8 +144,12 @@ class PandasSeriesAdapter(ValueArray):
         return {self.index_names[0]: self._series.index}
 
     def group(self) -> PandasSeriesAdapter:
+        if self._series.index.name is None:
+            series = self._series.rename_axis(f'dim_{self._axis_zero}')
+        else:
+            series = self._series
         return PandasSeriesAdapter(
-            self._series.groupby(self._series).apply(lambda x: x, include_groups=False),
+            series.groupby(series).apply(lambda x: x, include_groups=False),
             axis_zero=self._axis_zero,
         )
 

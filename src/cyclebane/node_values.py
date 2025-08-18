@@ -28,6 +28,10 @@ class NodeValues(Mapping[Hashable, ValueArray]):
             merged = self.merge(values)
             self._values = merged._values
 
+    def copy(self) -> NodeValues:
+        """Return a copy of the NodeValues."""
+        return NodeValues(dict(self._values))
+
     def __len__(self) -> int:
         """Return the number of columns."""
         return len(self._values)
@@ -39,6 +43,13 @@ class NodeValues(Mapping[Hashable, ValueArray]):
     def __getitem__(self, key: Hashable) -> ValueArray:
         """Return the column with the given name."""
         return self._values[key]
+
+    def __delitem__(self, key: Hashable) -> None:
+        """Remove the column with the given name."""
+        if key in self._values:
+            del self._values[key]
+        else:
+            raise KeyError(f'Node "{key}" does not exist in NodeValues.')
 
     def __setitem__(self, key: Hashable, value_array: ValueArray) -> None:
         """Add a single value array, checking for conflicts."""
