@@ -466,14 +466,8 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
-        # What if we flatten all (dependent) indices into tuples?
-        # x(x) = [1,2,3]
-        # y(x) = [a,b,a]
-        # y(y) = [a,b]
         for index_name, index in reversed(self.indices.items()):
             # Find all nodes with this index
-            # nodes_by_index_name: dict[IndexName, list[NodeName]] = {}
-            # Some show up twice or more, if multiple map ops?
             nodes = [
                 node
                 for node in graph.nodes()
@@ -481,7 +475,6 @@ class Graph:
                 in _node_indices(node.name if isinstance(node, NodeName) else node)
             ]
             # Make a copy for each index value
-            # single loop over flat index (list of tuples), but one rename per level
             graphs = [
                 _rename_successors(
                     graph, successors=nodes, index=IndexValues((index_name,), (i,))

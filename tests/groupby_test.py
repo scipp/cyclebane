@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2025 Scipp contributors (https://github.com/scipp)
+from collections.abc import Hashable
 
 import networkx as nx
 import pandas as pd
@@ -8,7 +9,7 @@ import cyclebane as cb
 
 
 def idx(
-    name: str, *index: int, offset=None, dims: tuple[str, ...] = ('dim_0', 'dim_1')
+    name: str, *index: Hashable, offset=None, dims: tuple[str, ...] = ('dim_0', 'dim_1')
 ) -> cb.graph.NodeName:
     """Helper to create a NodeName with a tuple of indices."""
     return cb.graph.NodeName(
@@ -26,11 +27,23 @@ def test_tmp() -> None:
     graph = cb.Graph(g)
     mapped = graph.map(df)
     grouped = mapped.groupby('b').reduce('c', name='d')
-    print(grouped.graph.nodes)
-    print(grouped.indices)
     result = grouped.to_networkx()
-    for node in result.nodes:
-        print(node, result.nodes[node])
+
+    # Nodes before grouping
+    assert result.nodes[idx('a', 0)] == {'value': 11}
+    assert result.nodes[idx('b', 0)] == {'value': 'a'}
+    assert result.nodes[idx('c', 0)] == {}
+    # Nodes after grouping
+    assert result.nodes[idx('d', 'a', dims=('b',))] == {}
+
+    # Edges to grouped node
+    assert result.has_edge(idx('c', 0), idx('d', 'a', dims=('b',)))
+    assert result.has_edge(idx('c', 1), idx('d', 'a', dims=('b',)))
+    assert result.has_edge(idx('c', 2), idx('d', 'b', dims=('b',)))
+    # No cross-group edges
+    assert not result.has_edge(idx('c', 0), idx('d', 'b', dims=('b',)))
+    assert not result.has_edge(idx('c', 1), idx('d', 'b', dims=('b',)))
+    assert not result.has_edge(idx('c', 2), idx('d', 'a', dims=('b',)))
 
 
 def test_graphs_with_different_mapping_over_same_node_can_be_combined() -> None:
