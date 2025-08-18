@@ -466,20 +466,23 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
-        grouped_index = 'dim_0'
+        subindex: Iterable[Iterable[IndexValue]] | None = None
         for index_name, index in reversed(self.indices.items()):
-            if index_name == grouped_index:
-                continue
-            graphs = _clone_graph(graph, index_name, index)
-            if isinstance(index, dict):
-                inner_index_name = grouped_index
+            if subindex is None:
+                graphs = _clone_graph(graph, index_name, index)
+            else:
                 graphs = [
-                    _clone_graph(graph_for_material, inner_index_name, inner_index)
-                    for inner_index, graph_for_material in zip(index.values(), graphs)
+                    _clone_graph(graph_for_group, index_name, inner_index)
+                    for inner_index, graph_for_group in zip(subindex, graphs)
                 ]
                 # Flatten nested list of graphs
                 graphs = [g for sublist in graphs for g in sublist]
-            graph = nx.compose_all(graphs)
+            if isinstance(index, dict):
+                subindex = index.values()
+                # No compose, delayed until we made clones within each group
+            else:
+                graph = nx.compose_all(graphs)
+
         # Replace all MappingNodes with their name
         new_names = {
             node: NodeName(node.name.name, node.index)
@@ -605,7 +608,7 @@ class GroupbyGraph:
         del node_values[node]  # Explicit since __setitem__ does not support replacing
         node_values[node] = groups
         # The grouping node becomes the new index name
-        # TODO Not strictly needed?
+        # TODO Add node after grouping? But would need to set value?
         # graph.add_node(_node_with_indices(node, (node,)))
         self._graph = Graph(graph, node_values=node_values)
 

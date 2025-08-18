@@ -148,7 +148,10 @@ class PandasSeriesAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
+        # TODO Things are getting weird, maybe we don't want to reduce the groupby,
+        # just use a custom object?
         if (multi_index := self._get_multi_index()) is not None:
+            # return {multi_index.names: self._groups}
             base = dict(zip(multi_index.names, multi_index.levels, strict=True))
             base[multi_index.names[0]] = self._groups
             return base
