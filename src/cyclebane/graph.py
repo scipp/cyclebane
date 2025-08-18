@@ -466,8 +466,19 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
+        grouped_index = 'dim_0'
         for index_name, index in reversed(self.indices.items()):
+            if index_name == grouped_index:
+                continue
             graphs = _clone_graph(graph, index_name, index)
+            if isinstance(index, dict):
+                inner_index_name = grouped_index
+                graphs = [
+                    _clone_graph(graph_for_material, inner_index_name, inner_index)
+                    for inner_index, graph_for_material in zip(index.values(), graphs)
+                ]
+                # Flatten nested list of graphs
+                graphs = [g for sublist in graphs for g in sublist]
             graph = nx.compose_all(graphs)
         # Replace all MappingNodes with their name
         new_names = {
@@ -587,9 +598,10 @@ class GroupbyGraph:
     def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
         graph = graph.copy()
         node_values = node_values.copy()
-        groups = node_values[node].group()
+        grouping = node_values[node]
         self._group_index_name = node
-        self._index_name = groups.index_names[1]  # Group-internal index to reduce over
+        self._index_name = grouping.index_names[0]
+        groups = grouping.group()
         del node_values[node]  # Explicit since __setitem__ does not support replacing
         node_values[node] = groups
         # The grouping node becomes the new index name
@@ -617,13 +629,14 @@ class GroupbyGraph:
         attrs:
             Attributes to set on the new node(s).
         """
-        return self._graph.reduce(
+        graph = self._graph.reduce(
             key=key,
             index=self._index_name,
             name=name,
             attrs=attrs,
             _extra_index_name=self._group_index_name,
         )
+        return graph
 
 
 def _clone_graph(

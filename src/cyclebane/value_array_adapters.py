@@ -69,9 +69,18 @@ class SequenceAdapter(ValueArray):
 
 
 class PandasSeriesAdapter(ValueArray):
-    def __init__(self, series: pandas.Series, *, axis_zero: int = 0):
+    def __init__(
+        self,
+        series: pandas.Series,
+        *,
+        axis_zero: int = 0,
+        _groups: dict[Hashable, pandas.Index[Any]] | None = None,
+    ):
         self._series = series
+        if self._get_multi_index() is None and self._series.index.name is None:
+            self._series = self._series.rename_axis(f'dim_{axis_zero}')
         self._axis_zero = axis_zero
+        self._groups = _groups
 
     @staticmethod
     def try_from(obj: Any, *, axis_zero: int = 0) -> PandasSeriesAdapter | None:
@@ -140,17 +149,17 @@ class PandasSeriesAdapter(ValueArray):
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
         if (multi_index := self._get_multi_index()) is not None:
-            return dict(zip(multi_index.names, multi_index.levels, strict=True))
+            base = dict(zip(multi_index.names, multi_index.levels, strict=True))
+            base[multi_index.names[0]] = self._groups
+            return base
         return {self.index_names[0]: self._series.index}
 
     def group(self) -> PandasSeriesAdapter:
-        if self._series.index.name is None:
-            series = self._series.rename_axis(f'dim_{self._axis_zero}')
-        else:
-            series = self._series
+        groupby = self._series.groupby(self._series)
         return PandasSeriesAdapter(
-            series.groupby(series).apply(lambda x: x, include_groups=False),
+            groupby.apply(lambda x: x, include_groups=False),
             axis_zero=self._axis_zero,
+            _groups=groupby.groups,
         )
 
 
