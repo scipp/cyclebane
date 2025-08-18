@@ -38,6 +38,7 @@ class TestNodeValues:
         node_values = NodeValues(values)
         assert len(node_values) == 2
         assert set(node_values.keys()) == {'a', 'b'}
+        assert list(node_values.indices) == ['dim_0', 'dim_1']
 
     def test_init_with_empty_values(self):
         """Test that initialization succeeds with empty values."""
