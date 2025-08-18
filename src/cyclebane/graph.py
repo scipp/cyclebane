@@ -466,11 +466,20 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
+        # TODO Better idea:
+        # 1. Do not change PandasSeriesAdapter.
+        # 2. Instead use (node,index_name) as index in NodeValues (not just node).
+        #    We can then have
+        #        {(Material, sample_dim): [Si,Si,Ge],
+        #         (Material, material_dim): [Si,Ge]}
+        # 3. Store grouping independently of NodeValues, they are unrelated.
         subindex: Iterable[Iterable[IndexValue]] | None = None
         for index_name, index in reversed(self.indices.items()):
             if subindex is None:
                 graphs = _clone_graph(graph, index_name, index)
             else:
+                # Note how `index` is unused in this branch, we assume it is represented
+                # by the subindex (but split by group).
                 graphs = [
                     _clone_graph(graph_for_group, index_name, inner_index)
                     for inner_index, graph_for_group in zip(subindex, graphs)
@@ -598,6 +607,7 @@ class GroupbyGraph:
     such as aggregation or summarization.
     """
 
+    # TODO Should we support a custom new dim name here, instead of using `node`?
     def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
         graph = graph.copy()
         node_values = node_values.copy()
