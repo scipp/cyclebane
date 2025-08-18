@@ -467,20 +467,7 @@ class Graph:
         """
         graph = self.graph
         for index_name, index in reversed(self.indices.items()):
-            # Find all nodes with this index
-            nodes = [
-                node
-                for node in graph.nodes()
-                if index_name
-                in _node_indices(node.name if isinstance(node, NodeName) else node)
-            ]
-            # Make a copy for each index value
-            graphs = [
-                _rename_successors(
-                    graph, successors=nodes, index=IndexValues((index_name,), (i,))
-                )
-                for i in index
-            ]
+            graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
         # Replace all MappingNodes with their name
         new_names = {
@@ -637,3 +624,22 @@ class GroupbyGraph:
             attrs=attrs,
             _extra_index_name=self._group_index_name,
         )
+
+
+def _clone_graph(
+    graph: nx.DiGraph, index_name: IndexName, index: Iterable[IndexValue]
+) -> list[nx.DiGraph]:
+    # Find all nodes with this index
+    nodes = [
+        node
+        for node in graph.nodes()
+        if index_name
+        in _node_indices(node.name if isinstance(node, NodeName) else node)
+    ]
+    # Make a copy for each index value
+    return [
+        _rename_successors(
+            graph, successors=nodes, index=IndexValues((index_name,), (i,))
+        )
+        for i in index
+    ]
