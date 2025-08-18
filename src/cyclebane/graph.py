@@ -442,6 +442,8 @@ class Graph:
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
         try:
+            # When setting at a MappedNode, allow using underlying node name for
+            # convenience.
             branch = self._from_orig_key(branch)
         except KeyError:
             pass
