@@ -91,7 +91,7 @@ class TestNodeValuesMerge:
         assert len(merged) == 2
         assert set(merged.keys()) == {'a', 'b'}
 
-    def test_merge_new_nodes_same_index_names_same_values(self):
+    def test_merge_new_nodes_same_index_names_same_index_values(self):
         """Adding new nodes with same index names and same index values."""
         initial_values = {
             'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)
