@@ -164,11 +164,6 @@ class PandasSeriesAdapter(ValueArray):
         groups = pandas.Series(groupby.groups)
         groups.index.rename(index_name, inplace=True)
         return PandasSeriesAdapter(groups)
-        return PandasSeriesAdapter(
-            groupby.apply(lambda x: x, include_groups=False),
-            axis_zero=self._axis_zero,
-            _groups=groupby.groups,
-        )
 
 
 class XarrayDataArrayAdapter(ValueArray):

@@ -353,108 +353,6 @@ class Graph:
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
         return PositionalIndexer(self, index_name)
 
-    def tmp(self):
-        graph = self.graph
-        for index_name, index in reversed(self.indices.items()):
-            graphs = [graph for i in index]
-            graph = nx.compose_all(graphs)
-        # say we have dims (x,y)
-        graphs_x = []
-        graphs_x[0] = [graph for y in coords_y]
-        graphs_x[1] = [graph for y in coords_y]
-        graphs_xy = zip(graphs_x, coord_x)
-        # with grouping
-        # Pandas MultiIndex ~ binned variable, outer dim x, inner dim y
-        # coords_y = [[a, c], [b]]  # dims=(x,)
-
-        # sample=(sample,) mat=(sample,) mat_groups=(mat,)
-        # (sample,mat)  # groupby
-        # (mat,)   # reduce
-
-        # TODO Can we have nodes that depend on (material,) but do not come from
-        # the grouping-reduce operation? How can we set those? Pass at same time
-        # to groupby (forwarding to map)?
-
-        # Now
-        for index_name, index in reversed(self.indices.items()):
-            graphs = self._clone_graph(graph, index_name, index)
-            graph = nx.compose_all(graphs)
-
-        # Then
-        for index_name, index in reversed(self.indices.items()):
-            if is_multi_index(index):
-                # Index looks like {'Si': [s1, s3], 'Ge': [s2]}
-
-                # One graph per material, do not compose!
-                graphs = self._clone_graph(graph, index_name, index.keys())
-                # IndexValues(axes=(mat,), values=(Si,))
-                # IndexValues(axes=(mat,), values=(Ge,))
-
-                inner_index_name = index.inner_index  # sample
-                # Si
-                # IndexValues(axes=(sample,), values=(s1,))
-                # IndexValues(axes=(sample,), values=(s3,))
-                # Ge
-                # IndexValues(axes=(sample,), values=(s2,))
-                graphs = [
-                    self._clone_graph(graph_for_material, inner_index_name, inner_index)
-                    for inner_index, graph_for_material in zip(index.values(), graphs)
-                ]
-                # graphs[Si]: [(e[Si],h[Si]), (e[Si],h[Si])]
-                # graphs[Ge]: [(e[Ge],h[Ge])]
-
-                # graphs[Si]: [(d[s1],f[Si]), (d[s3],f[Si])]
-                # graphs[Ge]: [(d[s2],f[Ge])]
-
-                # graphs[Si]: [(g[s1],j), (g[s3],j)]
-                # graphs[Ge]: [(g[s2],j)]
-
-                # PROBLEM: Does not work for nodes that have two indices!?
-
-                # No! We don't need grouped node, maybe? There is no compute for it!
-                # Final node names should be (at the grouped but not reduced node):
-                # Note: May want to flatten the list
-                # IndexValues(axes=(mat,sample), values=(Si,s1))
-                # IndexValues(axes=(mat,sample), values=(Si,s3))
-                # IndexValues(axes=(mat,sample), values=(Ge,s2))
-
-                graph = nx.compose_all(graphs)
-            else:
-                # Don't forget nodes not taking part in the grouping, which need
-                # IndexValues(axes=(sample,), values=(s1,))
-                # IndexValues(axes=(sample,), values=(s2,))
-                # IndexValues(axes=(sample,), values=(s3,))
-                # Done by second loop iteration? ... but will set up all-to-all edges?!
-                # Can we delay the compose_all until after the loop?
-                graphs = self._clone_graph(graph, index_name, index)
-                graph = nx.compose_all(graphs)
-
-        # 1. loop iteration
-        #   index_name=mat  # dim name
-        #   index=mat_groups  # list of materials
-        # => graph composed of graph copies, one for each material
-        # 1b. nested loop
-        #     mat_groups = {'Si': [s1, s3], 'Ge': [s2]}
-        #
-
-        # 2. loop iteration (important since there may be nodes mapped
-        #      over sample that are not grouped by material)
-        #   index_name=sample  # dim name
-        #   index=sample  # list of samples
-        # naively this would put *all* samples into the subgraph for each material
-
-        # 1. make small arrays, each different length
-        # 2. combine into ragged 2D array
-        graphs_x[0] = [graph for y in coords_y[0]]  # len=2
-        graphs_x[1] = [graph for y in coords_y[1]]  # len=1
-        graphs_xy = zip(graphs_x, coord_x)
-
-        # 1. make 1D array
-        # 2. replace each value by array of different length
-        graphs_y = [graph for x in coords_x]
-        zip(graphs_y[0], coord_y[0])  # len=2
-        zip(graphs_y[1], coord_y[1])  # len=1
-
     def _get_groupings(
         self,
     ) -> dict[IndexName, tuple[IndexName, Iterable[Iterable[IndexValue]]]]:
@@ -478,69 +376,24 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
-        # TODO Better idea:
-        # 1. Do not change PandasSeriesAdapter.
-        # 2. Instead use (node,index_name) as index in NodeValues (not just node).
-        #    We can then have
-        #        {(Material, sample_dim): [Si,Si,Ge],
-        #         (Material, material_dim): [Si,Ge]}
-        # 3. Store grouping independently of NodeValues, they are unrelated.
-        # subindex_name: IndexName | None = None
-        # subindex: Iterable[Iterable[IndexValue]] = [[]]
-
-        groupings = {
-            key.node: values
-            for key, values in self._node_values.items()
-            if isinstance(key, GroupingKey)
-        }
         groupings = self._get_groupings()
         is_subindex = [index_name for index_name, _ in groupings.values()]
-        # for index_name, index in reversed(self.indices.items()):
-        #    if (grouping := groupings.get(index_name)) is not None:
-        #        index_value = next(iter(index))
-        #        value = grouping.sel(((index_name, index_value),))
-        #        is_subindex.append(value.name)
-        print(f'{is_subindex=}')
 
         for index_name, index in reversed(self.indices.items()):
-            # TODO Try sth. like this, looks cleaner.
             if index_name in is_subindex:
                 continue
             graphs = _clone_graph(graph, index_name, index)
             if (grouping := groupings.get(index_name)) is not None:
-                # subindex = grouping._series
-                # subindex_name = next(iter(subindex)).name
                 subindex_name, subindex = grouping
-                is_subindex.append(subindex_name)
-                graphs = [
+                subgraphs = [
                     _clone_graph(graph_for_group, subindex_name, inner_index)
                     for inner_index, graph_for_group in zip(
                         subindex, graphs, strict=True
                     )
                 ]
                 # Flatten nested list of graphs
-                graphs = [g for sublist in graphs for g in sublist]
+                graphs = [g for sublist in subgraphs for g in sublist]
             graph = nx.compose_all(graphs)
-            continue
-
-            if index_name != subindex_name:
-                graphs = _clone_graph(graph, index_name, index)
-            else:
-                # Note how `index` is unused in this branch, we assume it is represented
-                # by the subindex (but split by group).
-                graphs = [
-                    _clone_graph(graph_for_group, index_name, inner_index)
-                    for inner_index, graph_for_group in zip(
-                        subindex, graphs, strict=True
-                    )
-                ]
-                # Flatten nested list of graphs
-                graphs = [g for sublist in graphs for g in sublist]
-            if (grouping := groupings.get(index_name)) is not None:
-                # No compose, delayed until we made clones within each group
-                subindex_name, subindex = grouping
-            else:
-                graph = nx.compose_all(graphs)
 
         # Replace all MappingNodes with their name
         new_names = {
@@ -710,17 +563,13 @@ class GroupbyGraph:
         attrs:
             Attributes to set on the new node(s).
         """
-        graph = self._graph.reduce(
+        return self._graph.reduce(
             key=key,
             index=self._index_name,
             name=name,
             attrs=attrs,
             _extra_index_name=self._group_index_name,
         )
-        # graph._groups = {
-        #    self._group_index_name: (self._index_name, self._groups.values())
-        # }
-        return graph
 
 
 def _clone_graph(
