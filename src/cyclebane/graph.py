@@ -545,6 +545,7 @@ class GroupbyGraph:
         node_values = node_values.merge({GroupingKey(node): groups})
         self._graph = Graph(graph, node_values=node_values)
 
+    # TODO Require specifying index!
     def reduce(
         self,
         key: None | Hashable = None,
