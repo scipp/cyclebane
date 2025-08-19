@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2023 Scipp contributors (https://github.com/scipp)
+import re
 from collections.abc import Hashable, Mapping, Sequence
 
 import networkx as nx
@@ -353,7 +354,7 @@ def test_reduce_scipp_mapped() -> None:
     assert 'sum' in reduced.graph
 
 
-def test_map_with_previously_mapped_index_name_raises() -> None:
+def test_map_with_previously_mapped_index_name_works_on_different_nodes() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
     g.add_edge('b', 'c')
@@ -362,8 +363,9 @@ def test_map_with_previously_mapped_index_name_raises() -> None:
     values = sc.arange('x', 3)
 
     mapped = graph.map({'a': values})
-    with pytest.raises(ValueError, match="Conflicting new index names"):
-        mapped.map({'b': values})
+    result = mapped.map({'b': values})
+    assert result.index_names == ('x',)
+    assert list(result.indices['x']) == [0, 1, 2]
 
 
 def test_map_multiple_joint_index() -> None:
@@ -726,6 +728,67 @@ def test_getitem_setitem_with_no_effects() -> None:
     # because the check for compatible indices/node-values is not implemented.
 
 
+def test_getitem_setitem_with_no_effects_on_mapped_graph() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['attr'] = 1
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+
+    # This should have no effect on the mapped graph
+    mapped['b'] = mapped['b']
+
+    result = mapped.to_networkx()
+
+    # Verify the mapping is preserved
+    assert result.nodes[idx('a', 0)] == {'attr': 1, 'value': 1}
+    assert result.nodes[idx('a', 1)] == {'attr': 1, 'value': 2}
+    assert result.nodes[idx('a', 2)] == {'attr': 1, 'value': 3}
+
+    # Verify all mapped nodes are still present
+    assert len([n for n in result.nodes if n.name == 'a']) == 3
+    assert len([n for n in result.nodes if n.name == 'b']) == 3
+    assert len([n for n in result.nodes if n.name == 'c']) == 3
+
+
+def test_mapped_getitem_setitem_shrinking_graph() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+    g.nodes['a']['attr'] = 1
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+
+    # This should make a graph with 2 nodes per mapped value
+    mapped['c'] = mapped['b']
+
+    result = mapped.to_networkx()
+    assert len(result.nodes) == 2 * 3
+
+    # Verify the mapping is preserved
+    assert result.nodes[idx('a', 0)] == {'attr': 1, 'value': 1}
+    assert result.nodes[idx('a', 1)] == {'attr': 1, 'value': 2}
+    assert result.nodes[idx('a', 2)] == {'attr': 1, 'value': 3}
+
+    # Verify all mapped nodes are still present, but b was removed
+    assert len([n for n in result.nodes if n.name == 'a']) == 3
+    assert len([n for n in result.nodes if n.name == 'c']) == 3
+
+
+def test_setitem_mapped_on_mapped_raises_on_incompatible_mapped_value() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('b', 'c')
+
+    graph = cb.Graph(g)
+    mapped = graph.map({'a': [1, 2, 3]})
+    with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
+        mapped['b'] = cb.Graph(nx.DiGraph()).map({'a': [4, 5]})
+
+
 def test_getitem_keeps_only_relevant_indices() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
@@ -771,7 +834,11 @@ def test_setitem_with_mapped_sink_node_raises_if_target_is_not_mapped() -> None:
     graph = cb.Graph(g)
     b = cb.Graph(nx.DiGraph()).map({'b': [11, 12]})
     with pytest.raises(
-        NotImplementedError, match="Mapped nodes not supported yet in __setitem__"
+        NotImplementedError,
+        match=re.escape(
+            "Trying to set mapped node on non-mapped node "
+            "(or vice versa) is not possible in __setitem__"
+        ),
     ):
         graph['b'] = b
 
@@ -784,11 +851,13 @@ def test_setitem_with_mapped_operands_raises_on_conflict() -> None:
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
     d = cb.Graph(nx.DiGraph()).map({'b': [11, 12]}).reduce('b', name='d')
-    with pytest.raises(ValueError, match="Conflicting new index names"):
+    with pytest.raises(
+        ValueError, match='Conflicting index values for index name "dim_0" of b'
+    ):
         mapped['x'] = d
 
 
-def test_setitem_currently_does_not_allow_compatible_indices() -> None:
+def test_setitem_allows_compatible_indices() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
     g.add_edge('c', 'd')
@@ -796,10 +865,9 @@ def test_setitem_currently_does_not_allow_compatible_indices() -> None:
     graph = cb.Graph(g)
     mapped1 = graph.map({'a': [1, 2, 3]})
     mapped2 = graph['d'].map({'c': [11, 12, 13]}).reduce('d', name='e')
-    # Note: This is a limitation of the current implementation. We could check if the
-    # indices are identical and allow this. For simplicity we currently do not.
-    with pytest.raises(ValueError, match="Conflicting new index names"):
-        mapped1['x'] = mapped2
+    mapped1['x'] = mapped2
+    assert mapped1.index_names == ('dim_0',)
+    assert mapped1.indices['dim_0'] == range(3)
 
 
 @pytest.mark.parametrize(
@@ -842,7 +910,7 @@ def test_setitem_raises_if_node_values_equivalent_but_of_different_type() -> Non
     mapped2 = graph.map({'a': np.array([1, 2])}).reduce('b', name='d')
     # One could imagine treating this as equivalent, but we are strict in the
     # comparison.
-    with pytest.raises(ValueError, match="Conflicting new index names"):
+    with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
         mapped1['x'] = mapped2['d']
 
 
