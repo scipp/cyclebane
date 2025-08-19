@@ -157,10 +157,13 @@ class PandasSeriesAdapter(ValueArray):
             return base
         return {self.index_names[0]: self._series.index}
 
-    def group(self) -> PandasSeriesAdapter:
-        groupby = self._series.groupby(self._series)
+    def group(self, index_name: Hashable) -> PandasSeriesAdapter:
+        import pandas
 
-        return groupby
+        groupby = self._series.groupby(self._series)
+        groups = pandas.Series(groupby.groups)
+        groups.index.rename(index_name, inplace=True)
+        return PandasSeriesAdapter(groups)
         return PandasSeriesAdapter(
             groupby.apply(lambda x: x, include_groups=False),
             axis_zero=self._axis_zero,

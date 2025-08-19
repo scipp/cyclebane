@@ -455,6 +455,18 @@ class Graph:
         zip(graphs_y[0], coord_y[0])  # len=2
         zip(graphs_y[1], coord_y[1])  # len=1
 
+    def _get_groupings(
+        self,
+    ) -> dict[IndexName, tuple[IndexName, Iterable[Iterable[IndexValue]]]]:
+        groupings = {
+            key.node: values._series
+            for key, values in self._node_values.items()
+            if isinstance(key, GroupingKey)
+        }
+        return {
+            key: (next(iter(values)).name, values) for key, values in groupings.items()
+        }
+
     def to_networkx(self, value_attr: str = 'value') -> nx.DiGraph:
         """
         Convert to a NetworkX graph, spelling out the internal array structures as
@@ -473,10 +485,44 @@ class Graph:
         #        {(Material, sample_dim): [Si,Si,Ge],
         #         (Material, material_dim): [Si,Ge]}
         # 3. Store grouping independently of NodeValues, they are unrelated.
-        subindex_name: IndexName | None = None
-        subindex: Iterable[Iterable[IndexValue]] = [[]]
-        groupings = getattr(self, '_groups', {})
+        # subindex_name: IndexName | None = None
+        # subindex: Iterable[Iterable[IndexValue]] = [[]]
+
+        groupings = {
+            key.node: values
+            for key, values in self._node_values.items()
+            if isinstance(key, GroupingKey)
+        }
+        groupings = self._get_groupings()
+        is_subindex = [index_name for index_name, _ in groupings.values()]
+        # for index_name, index in reversed(self.indices.items()):
+        #    if (grouping := groupings.get(index_name)) is not None:
+        #        index_value = next(iter(index))
+        #        value = grouping.sel(((index_name, index_value),))
+        #        is_subindex.append(value.name)
+        print(f'{is_subindex=}')
+
         for index_name, index in reversed(self.indices.items()):
+            # TODO Try sth. like this, looks cleaner.
+            if index_name in is_subindex:
+                continue
+            graphs = _clone_graph(graph, index_name, index)
+            if (grouping := groupings.get(index_name)) is not None:
+                # subindex = grouping._series
+                # subindex_name = next(iter(subindex)).name
+                subindex_name, subindex = grouping
+                is_subindex.append(subindex_name)
+                graphs = [
+                    _clone_graph(graph_for_group, subindex_name, inner_index)
+                    for inner_index, graph_for_group in zip(
+                        subindex, graphs, strict=True
+                    )
+                ]
+                # Flatten nested list of graphs
+                graphs = [g for sublist in graphs for g in sublist]
+            graph = nx.compose_all(graphs)
+            continue
+
             if index_name != subindex_name:
                 graphs = _clone_graph(graph, index_name, index)
             else:
@@ -602,6 +648,11 @@ class Graph:
         self.graph = graph
 
 
+@dataclass(frozen=True, slots=True)
+class GroupingKey:
+    node: Hashable
+
+
 class GroupbyGraph:
     """
     A graph that has been grouped by a specific index.
@@ -617,14 +668,21 @@ class GroupbyGraph:
         grouping = node_values[node]
         self._group_index_name = node
         self._index_name = grouping.index_names[0]
-        groupby = grouping.group()
-        self._groups = groupby.groups
+        groups = grouping.group(index_name=node)
+        # self._groups = groupby.groups
         # Hack to get extra index
         # Use tuple as key instead?
         # If someone needs this, they can reduce explicitly?
         # No, problem is merge with map over groups!
-        new_values = NodeValues.from_mapping({'xxxx': groupby.first()}, axis_zero=0)
-        node_values = node_values.merge(new_values)
+        # new_values = NodeValues.from_mapping({'xxxx': groupby.first()}, axis_zero=0)
+
+        # Store grouping as a special node value. This has two reasons:
+        # 1. We want the resulting graph to have the grouping node's unique values as
+        #    as a new index (and its name as the index name).
+        # 2. We need to store the grouping so we can perform the grouping operation when
+        #    building the full graph in `Graph.to_networkx`.
+        node_values = node_values.merge({GroupingKey(node): groups})
+
         # del node_values[node]  # Explicit since __setitem__ does not support replacing
         # node_values[node] = groups
         # The grouping node becomes the new index name
@@ -659,9 +717,9 @@ class GroupbyGraph:
             attrs=attrs,
             _extra_index_name=self._group_index_name,
         )
-        graph._groups = {
-            self._group_index_name: (self._index_name, self._groups.values())
-        }
+        # graph._groups = {
+        #    self._group_index_name: (self._index_name, self._groups.values())
+        # }
         return graph
 
 

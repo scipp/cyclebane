@@ -27,6 +27,11 @@ def test_tmp() -> None:
     graph = cb.Graph(g)
     mapped = graph.map(df)
     grouped = mapped.groupby('b').reduce('c', name='d')
+
+    print('Start test')
+    print(grouped.indices)
+    print(grouped.graph.nodes)
+
     result = grouped.to_networkx()
 
     # Nodes before grouping
