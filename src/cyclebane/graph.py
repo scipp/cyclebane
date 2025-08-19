@@ -377,19 +377,17 @@ class Graph:
         """
         graph = self.graph
         groupings = self._get_groupings()
-        is_subindex = [index_name for index_name, _ in groupings.values()]
+        is_grouped = [index_name for index_name, _ in groupings.values()]
 
         for index_name, index in reversed(self.indices.items()):
-            if index_name in is_subindex:
+            if index_name in is_grouped:
                 continue
             graphs = _clone_graph(graph, index_name, index)
             if (grouping := groupings.get(index_name)) is not None:
-                subindex_name, subindex = grouping
+                subindex_name, subindices = grouping
                 subgraphs = [
-                    _clone_graph(graph_for_group, subindex_name, inner_index)
-                    for inner_index, graph_for_group in zip(
-                        subindex, graphs, strict=True
-                    )
+                    _clone_graph(group_graph, subindex_name, subindex)
+                    for subindex, group_graph in zip(subindices, graphs, strict=True)
                 ]
                 # Flatten nested list of graphs
                 graphs = [g for sublist in subgraphs for g in sublist]
