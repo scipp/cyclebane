@@ -69,18 +69,9 @@ class SequenceAdapter(ValueArray):
 
 
 class PandasSeriesAdapter(ValueArray):
-    def __init__(
-        self,
-        series: pandas.Series,
-        *,
-        axis_zero: int = 0,
-        _groups: dict[Hashable, pandas.Index[Any]] | None = None,
-    ):
+    def __init__(self, series: pandas.Series, *, axis_zero: int = 0):
         self._series = series
-        if self._get_multi_index() is None and self._series.index.name is None:
-            self._series = self._series.rename_axis(f'dim_{axis_zero}')
         self._axis_zero = axis_zero
-        self._groups = _groups
 
     @staticmethod
     def try_from(obj: Any, *, axis_zero: int = 0) -> PandasSeriesAdapter | None:
@@ -89,7 +80,6 @@ class PandasSeriesAdapter(ValueArray):
         except ModuleNotFoundError:
             return None
         if isinstance(obj, pandas.Series):
-            # TODO Reject MultiIndex?
             return PandasSeriesAdapter(obj, axis_zero=axis_zero)
 
     def _equal(self, other: PandasSeriesAdapter) -> bool:
@@ -101,21 +91,10 @@ class PandasSeriesAdapter(ValueArray):
         if len(key) != 1:
             raise ValueError('PandasSeriesAdapter only supports single index')
         index_name, i = key[0]
-        if index_name not in self.index_names:
+        if index_name != self.index_names[0]:
             raise ValueError(
                 f'Unexpected index name {index_name} for PandasSeriesAdapter with '
                 f'index names {self.index_names}'
-            )
-        if self._get_multi_index() is not None:
-            s = self._series.xs(i, level=index_name)
-            if len(s) == 1:
-                return s.iloc[0]
-            is_constant = s.eq(s.iloc[0]).all()
-            if is_constant:
-                return s.iloc[0]
-            raise ValueError(
-                f'Cannot get single value from Pandas Series with index {index_name}'
-                f' and value {i}, as it is not constant.'
             )
         return self._series.loc[i]
 
@@ -123,22 +102,12 @@ class PandasSeriesAdapter(ValueArray):
         _, i = next(iter(key.items()))
         return PandasSeriesAdapter(self._series[i], axis_zero=self._axis_zero)
 
-    def _get_multi_index(self) -> pandas.MultiIndex | None:
-        import pandas
-
-        if isinstance(self._series.index, pandas.MultiIndex):
-            return self._series.index
-
     @property
     def shape(self) -> tuple[int, ...]:
-        if (multi_index := self._get_multi_index()) is not None:
-            return tuple(len(level) for level in multi_index.levels)
         return (len(self._series),)
 
     @property
     def index_names(self) -> tuple[IndexName, ...]:
-        if (multi_index := self._get_multi_index()) is not None:
-            return tuple(multi_index.names)
         index_name = (
             self._series.index.name
             if self._series.index.name is not None
@@ -148,19 +117,13 @@ class PandasSeriesAdapter(ValueArray):
 
     @property
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
-        # TODO Things are getting weird, maybe we don't want to reduce the groupby,
-        # just use a custom object?
-        if (multi_index := self._get_multi_index()) is not None:
-            # return {multi_index.names: self._groups}
-            base = dict(zip(multi_index.names, multi_index.levels, strict=True))
-            base[multi_index.names[0]] = self._groups
-            return base
         return {self.index_names[0]: self._series.index}
 
     def group(self, index_name: Hashable) -> PandasSeriesAdapter:
         import pandas
 
-        groupby = self._series.groupby(self._series)
+        inner_index = self.index_names[0]
+        groupby = self._series.rename_axis(inner_index).groupby(self._series)
         groups = pandas.Series(groupby.groups)
         groups.index.rename(index_name, inplace=True)
         return PandasSeriesAdapter(groups)
