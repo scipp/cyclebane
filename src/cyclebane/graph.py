@@ -379,6 +379,13 @@ class Graph:
         groupings = self._get_groupings()
         is_grouped = [index_name for index_name, _ in groupings.values()]
 
+        # for index_name, index in reversed(self.groupings.items()):
+        #    # nested case
+        # for index_name, index in reversed(self.indices.items()):
+        #    # regular case
+        #    graphs = _clone_graph(graph, index_name, index)
+        #    graph = nx.compose_all(graphs)
+
         for index_name, index in reversed(self.indices.items()):
             if index_name in is_grouped:
                 continue
@@ -516,29 +523,26 @@ class GroupbyGraph:
     # TODO Should we support a custom new dim name here, instead of using `node`?
     def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
         graph = graph.copy()
-        grouping = node_values[node]
+        values_to_group_by = node_values[node]
         self._group_index_name = node
-        self._index_name = grouping.index_names[0]
-        groups = grouping.group(index_name=node)
-        # self._groups = groupby.groups
-        # Hack to get extra index
-        # Use tuple as key instead?
-        # If someone needs this, they can reduce explicitly?
-        # No, problem is merge with map over groups!
-        # new_values = NodeValues.from_mapping({'xxxx': groupby.first()}, axis_zero=0)
+        self._index_name = values_to_group_by.index_names[0]
+        groups = values_to_group_by.group(index_name=node)
+
+        # 1. Store grouping dict
+        # 2. Store node (group index name)
+        # 3. Index name to reduce over
+        # groups = {material: {Si:(sample,[a,b]), Ge:(sample,[c])}}
+        # groups = {GroupingKey(material): {Si:(sample,[a,b]), Ge:(sample,[c])}}
 
         # Store grouping as a special node value. This has two reasons:
         # 1. We want the resulting graph to have the grouping node's unique values as
         #    as a new index (and its name as the index name).
         # 2. We need to store the grouping so we can perform the grouping operation when
         #    building the full graph in `Graph.to_networkx`.
-        node_values = node_values.merge({GroupingKey(node): groups})
 
-        # del node_values[node]  # Explicit since __setitem__ does not support replacing
-        # node_values[node] = groups
-        # The grouping node becomes the new index name
-        # TODO Add node after grouping? But would need to set value?
-        # graph.add_node(_node_with_indices(node, (node,)))
+        # Other option would be to store a special "value" on the reduce node?!
+        # TODO This is dropped by __getitem__!
+        node_values = node_values.merge({GroupingKey(node): groups})
         self._graph = Graph(graph, node_values=node_values)
 
     def reduce(
