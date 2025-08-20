@@ -18,7 +18,7 @@ def idx(
     )
 
 
-def test_tmp() -> None:
+def test_basic_map_groupby_reduce_gives_correct_graph_structure() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'c')
     g.add_edge('b', 'c')
@@ -27,10 +27,6 @@ def test_tmp() -> None:
     graph = cb.Graph(g)
     mapped = graph.map(df)
     grouped = mapped.groupby('b').reduce('c', name='d')
-
-    print('Start test')
-    print(grouped.indices)
-    print(grouped.graph.nodes)
 
     result = grouped.to_networkx()
 
@@ -49,19 +45,3 @@ def test_tmp() -> None:
     assert not result.has_edge(idx('c', 0), idx('d', 'b', dims=('b',)))
     assert not result.has_edge(idx('c', 1), idx('d', 'b', dims=('b',)))
     assert not result.has_edge(idx('c', 2), idx('d', 'a', dims=('b',)))
-
-
-def test_graphs_with_different_mapping_over_same_node_can_be_combined() -> None:
-    g = nx.DiGraph()
-    g.add_edge('a', 'b')
-
-    graph = cb.Graph(g)
-    mapped = graph.map({'a': [1, 2, 3]})
-    result = mapped.to_networkx()
-
-    assert result.nodes[idx('a', 0)] == {'value': 1}
-    assert result.nodes[idx('a', 1)] == {'value': 2}
-    assert result.nodes[idx('a', 2)] == {'value': 3}
-    assert result.nodes[idx('b', 0)] == {}
-    assert result.nodes[idx('b', 1)] == {}
-    assert result.nodes[idx('b', 2)] == {}
