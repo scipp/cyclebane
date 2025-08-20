@@ -4,6 +4,7 @@ from collections.abc import Hashable
 
 import networkx as nx
 import pandas as pd
+import pytest
 
 import cyclebane as cb
 
@@ -45,3 +46,29 @@ def test_basic_map_groupby_reduce_gives_correct_graph_structure() -> None:
     assert not result.has_edge(idx('c', 0), idx('d', 'b', dims=('b',)))
     assert not result.has_edge(idx('c', 1), idx('d', 'b', dims=('b',)))
     assert not result.has_edge(idx('c', 2), idx('d', 'a', dims=('b',)))
+
+
+def test_group_in_different_ways() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'b')
+    g.add_edge('attach2', 'd')
+    df = pd.DataFrame(
+        {'a': [11, 22, 33], 'param1': ['a', 'a', 'b'], 'param2': ['x', 'y', 'x']}
+    )
+
+    graph = cb.Graph(g)
+    mapped = graph.map(df)
+    grouped = mapped.groupby('param1').reduce('b', name='grouped1')
+    grouped2 = mapped.groupby('param2').reduce('b', name='grouped2')
+
+    # Map helper node over param2 so we have a place where we can attached the grouping
+    # by param2.
+    grouped = grouped.map(
+        pd.DataFrame({'attach2': [None, None], 'param2': ['x', 'y']}).set_index(
+            'param2'
+        )
+    )
+    grouped['attach2'] = grouped2['grouped2']
+
+    with pytest.raises(KeyError, match='dim_0'):
+        grouped.to_networkx()
