@@ -492,11 +492,6 @@ class Graph:
         self.graph = graph
 
 
-@dataclass(frozen=True, slots=True)
-class GroupingKey:
-    node: Hashable
-
-
 class GroupbyGraph:
     """
     A graph that has been grouped by a specific index.

@@ -105,7 +105,7 @@ class ValueArray(ABC):
         return None
 
 
-@dataclass
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Grouping:
     indices: Iterable[Iterable[IndexValue]]
     index_name: IndexName
