@@ -59,7 +59,9 @@ class NodeValues(Mapping[Hashable, ValueArray]):
             if existing_value == value_array:
                 return  # No change needed
             else:
-                raise ValueError(f"Node '{key}' has already been mapped")
+                del self._values[key]  # Remove existing value
+            # else:
+            #    raise ValueError(f"Node '{key}' has already been mapped")
 
         # Check for index conflicts
         existing_indices = self.indices

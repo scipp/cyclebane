@@ -70,5 +70,5 @@ def test_group_in_different_ways() -> None:
     )
     grouped['attach2'] = grouped2['grouped2']
 
-    with pytest.raises(KeyError, match='dim_0'):
-        grouped.to_networkx()
+    # with pytest.raises(KeyError, match='dim_0'):
+    grouped.to_networkx()

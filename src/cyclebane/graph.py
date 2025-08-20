@@ -366,25 +366,39 @@ class Graph:
         graph = self.graph
         regular_indices = dict(reversed(self.indices.items()))
         node_values = self._node_values.copy()
+        graphs_for_grouping = []
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
+                # Subgraph of all ancestors and descendants
+                key = self._from_orig_key(key)
+                subgraph = graph.subgraph(
+                    nx.ancestors(graph, key) | nx.descendants(graph, key) | {key}
+                )
                 # Note how this will raise if there are multiple groupings of the same
                 # index name, or into the same index name. We could support this if it
                 # is compatible, but the current graph building approach would not work.
-                del regular_indices[grouping.index_name]
+                regular_indices.pop(grouping.index_name, None)
                 index = regular_indices.pop(grouping.group_index_name)
-                graphs = _clone_graph(graph, grouping.group_index_name, index)
+                graphs = _clone_graph(subgraph, grouping.group_index_name, index)
                 subgraphs = [
                     _clone_graph(group_graph, grouping.index_name, idx)
                     for idx, group_graph in zip(grouping.indices, graphs, strict=True)
                 ]
                 # Flatten nested list of graphs
                 graphs = [g for sublist in subgraphs for g in sublist]
-                graph = nx.compose_all(graphs)
+                graphs_for_grouping.append(nx.compose_all(graphs))
+        if graphs_for_grouping:
+            # If we have grouping, we need to merge the graphs for each grouping
+            graph = nx.compose_all(graphs_for_grouping)
         for index_name, index in regular_indices.items():
             graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
+        # Remove all nodes that are MappedNode
+        # graph = nx.subgraph_view(
+        #    graph,
+        #    filter_node=lambda node: not isinstance(node, MappedNode),
+        # )
 
         # Replace all MappingNodes with their name
         new_names = {
@@ -489,6 +503,12 @@ class Graph:
 
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
+
+        if sink.name in self._node_values:
+            node_values = self._node_values[sink.name]
+            del self._node_values[sink.name]
+            self._node_values[branch.name] = node_values
+
         self.graph = graph
 
 
