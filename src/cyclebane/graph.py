@@ -10,7 +10,6 @@ from uuid import uuid4
 import networkx as nx
 
 from .node_values import IndexName, IndexValue, NodeValues
-from .value_array import Grouping
 
 
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
@@ -354,20 +353,6 @@ class Graph:
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
         return PositionalIndexer(self, index_name)
 
-    def _get_groupings(
-        self,
-    ) -> dict[IndexName, tuple[IndexName, Iterable[Iterable[IndexValue]]]]:
-        # TODO return list, can have different groupings for some index names.
-        groupings = {}
-        node_values = self._node_values.copy()
-        for key, values in self._node_values.items():
-            if (grouping := values.get_grouping()) is not None:
-                del node_values[key]
-                group_index_name = values.index_names[0]
-                index_name = next(iter(grouping)).name
-                groupings[group_index_name] = (index_name, grouping)
-        return groupings, node_values
-
     def to_networkx(self, value_attr: str = 'value') -> nx.DiGraph:
         """
         Convert to a NetworkX graph, spelling out the internal array structures as
@@ -379,16 +364,14 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
-        # groupings, true_node_values = self._get_groupings()
-        # is_grouped = [index_name for index_name, _ in groupings.values()]
-
-        # print(f'{groupings=}')
-        # print(f'{is_grouped=}')
         regular_indices = dict(reversed(self.indices.items()))
         node_values = self._node_values.copy()
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
+                # Note how this will raise if there are multiple groupings of the same
+                # index name, or into the same index name. We could support this if it
+                # is compatible, but the current graph building approach would not work.
                 del regular_indices[grouping.index_name]
                 index = regular_indices.pop(grouping.group_index_name)
                 graphs = _clone_graph(graph, grouping.group_index_name, index)
@@ -402,27 +385,6 @@ class Graph:
         for index_name, index in regular_indices.items():
             graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
-
-        # for index_name, index in reversed(self.groupings.items()):
-        #    # nested case
-        # for index_name, index in reversed(self.indices.items()):
-        #    # regular case
-        #    graphs = _clone_graph(graph, index_name, index)
-        #    graph = nx.compose_all(graphs)
-
-        # for index_name, index in reversed(self.indices.items()):
-        #    if index_name in is_grouped:
-        #        continue
-        #    graphs = _clone_graph(graph, index_name, index)
-        #    if (grouping := groupings.get(index_name)) is not None:
-        #        subindex_name, subindices = grouping
-        #        subgraphs = [
-        #            _clone_graph(group_graph, subindex_name, subindex)
-        #            for subindex, group_graph in zip(subindices, graphs, strict=True)
-        #        ]
-        #        # Flatten nested list of graphs
-        #        graphs = [g for sublist in subgraphs for g in sublist]
-        #    graph = nx.compose_all(graphs)
 
         # Replace all MappingNodes with their name
         new_names = {
@@ -546,31 +508,14 @@ class GroupbyGraph:
 
     # TODO Should we support a custom new dim name here, instead of using `node`?
     def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
-        self._graph = graph  # .copy()
+        self._graph = graph
         self._node_values = node_values
         values_to_group_by = node_values[node]
         self._group_index_name = node
         self._index_name = values_to_group_by.index_names[0]
         self._groups = values_to_group_by.group(index_name=node)
 
-        # 1. Store grouping dict
-        # 2. Store node (group index name)
-        # 3. Index name to reduce over
-        # groups = {material: {Si:(sample,[a,b]), Ge:(sample,[c])}}
-        # groups = {GroupingKey(material): {Si:(sample,[a,b]), Ge:(sample,[c])}}
-
-        # Store grouping as a special node value. This has two reasons:
-        # 1. We want the resulting graph to have the grouping node's unique values as
-        #    as a new index (and its name as the index name).
-        # 2. We need to store the grouping so we can perform the grouping operation when
-        #    building the full graph in `Graph.to_networkx`.
-
-        # Other option would be to store a special "value" on the reduce node?!
-        # TODO This is dropped by __getitem__!
-        # node_values = node_values.merge({GroupingKey(node): groups})
-        # self._graph = Graph(graph, node_values=node_values)
-
-    # TODO Require specifying index!
+    # TODO Require specifying index!?
     def reduce(
         self,
         key: None | Hashable = None,
@@ -593,6 +538,9 @@ class GroupbyGraph:
         """
         # Generate name here since we want to store grouping on the new "reduce" node.
         name = name or _get_new_node_name(self._graph)
+        # Why do we store the grouping here? This works well with existing mechanisms,
+        # e.g., __getitem__, which needs to decided what subset of node values to keep
+        # when returning a subgraph.
         node_values = self._node_values.merge({name: self._groups})
         graph = Graph(self._graph, node_values=node_values)
         return graph.reduce(

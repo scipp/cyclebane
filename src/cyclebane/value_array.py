@@ -85,7 +85,7 @@ class ValueArray(ABC):
     def indices(self) -> dict[IndexName, Iterable[IndexValue]]:
         pass
 
-    def group(self) -> ValueArray:
+    def group(self, index_name: Hashable) -> ValueArray:
         """
         Group the values by their indices.
 

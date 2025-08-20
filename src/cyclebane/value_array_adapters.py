@@ -123,12 +123,9 @@ class PandasSeriesAdapter(ValueArray):
         return {self.index_names[0]: self._series.index}
 
     def group(self, index_name: Hashable) -> PandasSeriesAdapter:
-        import pandas
-
         inner_index = self.index_names[0]
         groupby = self._series.rename_axis(inner_index).groupby(self._series)
-        # {Si:[a,b],Ge:[c]}
-        groups = pandas.Series(groupby.groups)
+        groups = type(self._series)(groupby.groups)
         groups.index.rename(index_name, inplace=True)
         return PandasSeriesAdapter(groups, _is_grouping=True)
 
