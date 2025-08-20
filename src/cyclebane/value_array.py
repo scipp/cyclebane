@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Hashable, Iterable
+from dataclasses import dataclass
 from typing import Any, ClassVar, TypeVar
 
 IndexName = Hashable
@@ -94,3 +95,18 @@ class ValueArray(ABC):
         raise NotImplementedError(
             'ValueArray.group() is only implemented for Pandas series.'
         )
+
+    def get_grouping(self) -> Grouping | None:
+        """
+        If the instance holds grouping information, return it.
+
+        Meant to be overridden by subclasses that support grouping.
+        """
+        return None
+
+
+@dataclass
+class Grouping:
+    indices: Iterable[Iterable[IndexValue]]
+    index_name: IndexName
+    group_index_name: IndexName

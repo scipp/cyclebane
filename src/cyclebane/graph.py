@@ -10,6 +10,7 @@ from uuid import uuid4
 import networkx as nx
 
 from .node_values import IndexName, IndexValue, NodeValues
+from .value_array import Grouping
 
 
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
@@ -356,16 +357,15 @@ class Graph:
     def _get_groupings(
         self,
     ) -> dict[IndexName, tuple[IndexName, Iterable[Iterable[IndexValue]]]]:
+        # TODO return list, can have different groupings for some index names.
         groupings = {}
         node_values = self._node_values.copy()
         for key, values in self._node_values.items():
-            if (get_grouping := getattr(values, 'get_grouping', None)) is not None:
-                grouping = get_grouping()
-                if grouping is not None:
-                    del node_values[key]
-                    group_index_name = values.index_names[0]
-                    index_name = next(iter(grouping)).name
-                    groupings[group_index_name] = (index_name, grouping)
+            if (grouping := values.get_grouping()) is not None:
+                del node_values[key]
+                group_index_name = values.index_names[0]
+                index_name = next(iter(grouping)).name
+                groupings[group_index_name] = (index_name, grouping)
         return groupings, node_values
 
     def to_networkx(self, value_attr: str = 'value') -> nx.DiGraph:
@@ -379,11 +379,29 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
-        groupings, true_node_values = self._get_groupings()
-        is_grouped = [index_name for index_name, _ in groupings.values()]
+        # groupings, true_node_values = self._get_groupings()
+        # is_grouped = [index_name for index_name, _ in groupings.values()]
 
-        print(f'{groupings=}')
-        print(f'{is_grouped=}')
+        # print(f'{groupings=}')
+        # print(f'{is_grouped=}')
+        regular_indices = dict(reversed(self.indices.items()))
+        node_values = self._node_values.copy()
+        for key, values in self._node_values.items():
+            if (grouping := values.get_grouping()) is not None:
+                del node_values[key]
+                del regular_indices[grouping.index_name]
+                index = regular_indices.pop(grouping.group_index_name)
+                graphs = _clone_graph(graph, grouping.group_index_name, index)
+                subgraphs = [
+                    _clone_graph(group_graph, grouping.index_name, idx)
+                    for idx, group_graph in zip(grouping.indices, graphs, strict=True)
+                ]
+                # Flatten nested list of graphs
+                graphs = [g for sublist in subgraphs for g in sublist]
+                graph = nx.compose_all(graphs)
+        for index_name, index in regular_indices.items():
+            graphs = _clone_graph(graph, index_name, index)
+            graph = nx.compose_all(graphs)
 
         # for index_name, index in reversed(self.groupings.items()):
         #    # nested case
@@ -392,19 +410,19 @@ class Graph:
         #    graphs = _clone_graph(graph, index_name, index)
         #    graph = nx.compose_all(graphs)
 
-        for index_name, index in reversed(self.indices.items()):
-            if index_name in is_grouped:
-                continue
-            graphs = _clone_graph(graph, index_name, index)
-            if (grouping := groupings.get(index_name)) is not None:
-                subindex_name, subindices = grouping
-                subgraphs = [
-                    _clone_graph(group_graph, subindex_name, subindex)
-                    for subindex, group_graph in zip(subindices, graphs, strict=True)
-                ]
-                # Flatten nested list of graphs
-                graphs = [g for sublist in subgraphs for g in sublist]
-            graph = nx.compose_all(graphs)
+        # for index_name, index in reversed(self.indices.items()):
+        #    if index_name in is_grouped:
+        #        continue
+        #    graphs = _clone_graph(graph, index_name, index)
+        #    if (grouping := groupings.get(index_name)) is not None:
+        #        subindex_name, subindices = grouping
+        #        subgraphs = [
+        #            _clone_graph(group_graph, subindex_name, subindex)
+        #            for subindex, group_graph in zip(subindices, graphs, strict=True)
+        #        ]
+        #        # Flatten nested list of graphs
+        #        graphs = [g for sublist in subgraphs for g in sublist]
+        #    graph = nx.compose_all(graphs)
 
         # Replace all MappingNodes with their name
         new_names = {
@@ -418,7 +436,7 @@ class Graph:
         for node in graph.nodes:
             if (
                 isinstance(node, NodeName)
-                and (value_array := true_node_values.get(node.name)) is not None
+                and (value_array := node_values.get(node.name)) is not None
             ):
                 graph.nodes[node][value_attr] = value_array.sel(node.index.to_tuple())
 

@@ -6,7 +6,7 @@ from collections.abc import Hashable, Iterable, Sequence
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from .value_array import ValueArray
+from .value_array import Grouping, ValueArray
 
 if TYPE_CHECKING:
     import numpy
@@ -69,9 +69,12 @@ class SequenceAdapter(ValueArray):
 
 
 class PandasSeriesAdapter(ValueArray):
-    def __init__(self, series: pandas.Series, *, axis_zero: int = 0):
+    def __init__(
+        self, series: pandas.Series, *, axis_zero: int = 0, _is_grouping: bool = False
+    ):
         self._series = series
         self._axis_zero = axis_zero
+        self._is_grouping = _is_grouping
 
     @staticmethod
     def try_from(obj: Any, *, axis_zero: int = 0) -> PandasSeriesAdapter | None:
@@ -127,13 +130,15 @@ class PandasSeriesAdapter(ValueArray):
         # {Si:[a,b],Ge:[c]}
         groups = pandas.Series(groupby.groups)
         groups.index.rename(index_name, inplace=True)
-        return PandasSeriesAdapter(groups)
+        return PandasSeriesAdapter(groups, _is_grouping=True)
 
-    def get_grouping(self) -> Iterable[Iterable[IndexValue]] | None:
-        import pandas
-
-        if isinstance(self._series.iloc[0], pandas.Index):
-            return self._series
+    def get_grouping(self) -> Grouping | None:
+        if self._is_grouping:
+            return Grouping(
+                indices=self._series,
+                group_index_name=self.index_names[0],
+                index_name=next(iter(self._series)).name,
+            )
 
 
 class XarrayDataArrayAdapter(ValueArray):
