@@ -356,14 +356,17 @@ class Graph:
     def _get_groupings(
         self,
     ) -> dict[IndexName, tuple[IndexName, Iterable[Iterable[IndexValue]]]]:
-        groupings = {
-            key.node: values._series
-            for key, values in self._node_values.items()
-            if isinstance(key, GroupingKey)
-        }
-        return {
-            key: (next(iter(values)).name, values) for key, values in groupings.items()
-        }
+        groupings = {}
+        node_values = self._node_values.copy()
+        for key, values in self._node_values.items():
+            if (get_grouping := getattr(values, 'get_grouping', None)) is not None:
+                grouping = get_grouping()
+                if grouping is not None:
+                    del node_values[key]
+                    group_index_name = values.index_names[0]
+                    index_name = next(iter(grouping)).name
+                    groupings[group_index_name] = (index_name, grouping)
+        return groupings, node_values
 
     def to_networkx(self, value_attr: str = 'value') -> nx.DiGraph:
         """
@@ -376,8 +379,11 @@ class Graph:
             The name of the attribute on nodes that holds the array-like object.
         """
         graph = self.graph
-        groupings = self._get_groupings()
+        groupings, true_node_values = self._get_groupings()
         is_grouped = [index_name for index_name, _ in groupings.values()]
+
+        print(f'{groupings=}')
+        print(f'{is_grouped=}')
 
         # for index_name, index in reversed(self.groupings.items()):
         #    # nested case
@@ -412,9 +418,9 @@ class Graph:
         for node in graph.nodes:
             if (
                 isinstance(node, NodeName)
-                and (node_values := self._node_values.get(node.name)) is not None
+                and (value_array := true_node_values.get(node.name)) is not None
             ):
-                graph.nodes[node][value_attr] = node_values.sel(node.index.to_tuple())
+                graph.nodes[node][value_attr] = value_array.sel(node.index.to_tuple())
 
         return graph
 
@@ -522,11 +528,12 @@ class GroupbyGraph:
 
     # TODO Should we support a custom new dim name here, instead of using `node`?
     def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
-        graph = graph.copy()
+        self._graph = graph  # .copy()
+        self._node_values = node_values
         values_to_group_by = node_values[node]
         self._group_index_name = node
         self._index_name = values_to_group_by.index_names[0]
-        groups = values_to_group_by.group(index_name=node)
+        self._groups = values_to_group_by.group(index_name=node)
 
         # 1. Store grouping dict
         # 2. Store node (group index name)
@@ -542,8 +549,8 @@ class GroupbyGraph:
 
         # Other option would be to store a special "value" on the reduce node?!
         # TODO This is dropped by __getitem__!
-        node_values = node_values.merge({GroupingKey(node): groups})
-        self._graph = Graph(graph, node_values=node_values)
+        # node_values = node_values.merge({GroupingKey(node): groups})
+        # self._graph = Graph(graph, node_values=node_values)
 
     # TODO Require specifying index!
     def reduce(
@@ -566,7 +573,11 @@ class GroupbyGraph:
         attrs:
             Attributes to set on the new node(s).
         """
-        return self._graph.reduce(
+        # Generate name here since we want to store grouping on the new "reduce" node.
+        name = name or _get_new_node_name(self._graph)
+        node_values = self._node_values.merge({name: self._groups})
+        graph = Graph(self._graph, node_values=node_values)
+        return graph.reduce(
             key=key,
             index=self._index_name,
             name=name,

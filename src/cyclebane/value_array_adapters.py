@@ -124,9 +124,16 @@ class PandasSeriesAdapter(ValueArray):
 
         inner_index = self.index_names[0]
         groupby = self._series.rename_axis(inner_index).groupby(self._series)
+        # {Si:[a,b],Ge:[c]}
         groups = pandas.Series(groupby.groups)
         groups.index.rename(index_name, inplace=True)
         return PandasSeriesAdapter(groups)
+
+    def get_grouping(self) -> Iterable[Iterable[IndexValue]] | None:
+        import pandas
+
+        if isinstance(self._series.iloc[0], pandas.Index):
+            return self._series
 
 
 class XarrayDataArrayAdapter(ValueArray):
