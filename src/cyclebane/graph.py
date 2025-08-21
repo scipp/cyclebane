@@ -10,6 +10,7 @@ from uuid import uuid4
 import networkx as nx
 
 from .node_values import IndexName, IndexValue, NodeValues
+from .value_array import Grouping
 
 
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
@@ -365,59 +366,24 @@ class Graph:
         """
         graph = self.graph.copy()
 
-        regular_indices = dict(reversed(self.indices.items()))
+        # Maintain a list of actual node values, without groupings, since we only want
+        # to set the former (user-provided) on (input) nodes.
         node_values = self._node_values.copy()
         groupby_graphs = []
-        print('-' * 80)
-        for edge in graph.edges:
-            print(edge)
-        print('-' * 80)
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
                 key = self._from_orig_key(key)
                 groupby_graph = graph.subgraph([*graph.predecessors(key), key]).copy()
                 graph.remove_edges_from(groupby_graph.edges)
-                for index_name, index in reversed(self.indices.items()):
-                    if index_name == grouping.index_name:
-                        continue
-                    graphs = _clone_graph(groupby_graph, index_name, index)
-                    if index_name == grouping.group_index_name:
-                        subgraphs = [
-                            _clone_graph(group_graph, grouping.index_name, idx)
-                            for idx, group_graph in zip(
-                                grouping.indices, graphs, strict=True
-                            )
-                        ]
-                        # Flatten nested list of graphs
-                        graphs = [g for sublist in subgraphs for g in sublist]
-                    groupby_graph = nx.compose_all(graphs)
+                groupby_graphs.append(self._make_groupby_graph(grouping, groupby_graph))
 
-                # regular_indices.pop(grouping.index_name, None)
-                for node in groupby_graph.nodes:
-                    print(node)
-                for edge in groupby_graph.edges:
-                    print(edge)
-                groupby_graphs.append(groupby_graph)
-
-        # if groupby_graphs:
-        #    # If we have grouping, we need to merge the graphs for each grouping
-        #    graph = nx.compose_all(groupby_graphs)
-
-        print('-' * 80)
-        for node in graph.nodes:
-            print(node)
-        for edge in graph.edges:
-            print(edge)
-        for index_name, index in regular_indices.items():
+        for index_name, index in reversed(self.indices.items()):
             graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
-        graph = nx.compose_all([*groupby_graphs, graph])
-        # Remove all nodes that are MappedNode
-        # graph = nx.subgraph_view(
-        #    graph,
-        #    filter_node=lambda node: not isinstance(node, MappedNode),
-        # )
+
+        if groupby_graphs:
+            graph = nx.compose_all([*groupby_graphs, graph])
 
         # Replace all MappingNodes with their name
         new_names = {
@@ -436,6 +402,23 @@ class Graph:
                 graph.nodes[node][value_attr] = value_array.sel(node.index.to_tuple())
 
         return graph
+
+    def _make_groupby_graph(
+        self, grouping: Grouping, groupby_graph: nx.DiGraph
+    ) -> nx.DiGraph:
+        for index_name, index in reversed(self.indices.items()):
+            if index_name == grouping.index_name:
+                continue
+            graphs = _clone_graph(groupby_graph, index_name, index)
+            if index_name == grouping.group_index_name:
+                subgraphs = [
+                    _clone_graph(group_graph, grouping.index_name, idx)
+                    for idx, group_graph in zip(grouping.indices, graphs, strict=True)
+                ]
+                # Flatten nested list of graphs
+                graphs = [g for sublist in subgraphs for g in sublist]
+            groupby_graph = nx.compose_all(graphs)
+        return groupby_graph
 
     def __getitem__(self, key: Hashable | slice) -> Graph:
         """
@@ -523,6 +506,7 @@ class Graph:
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
 
+        # TODO Need to update the key of node values
         if sink.name in self._node_values:
             node_values = self._node_values[sink.name]
             del self._node_values[sink.name]
