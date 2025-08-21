@@ -112,6 +112,12 @@ def _node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> Mapped
     return MappedNode(name=node, indices=indices)
 
 
+def _node_name(node: Hashable) -> Hashable:
+    if isinstance(node, MappedNode):
+        return node.name
+    return node
+
+
 def _node_indices(node: Hashable) -> tuple[IndexName, ...]:
     if isinstance(node, MappedNode):
         return node.indices
@@ -506,11 +512,13 @@ class Graph:
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
 
-        # TODO Need to update the key of node values
-        if sink.name in self._node_values:
-            node_values = self._node_values[sink.name]
-            del self._node_values[sink.name]
-            self._node_values[branch.name] = node_values
+        # Ensure we preserve the node values of the branch, if it exists. This step is
+        # necessary since __setitem__ effectively renames the sink node of the input
+        # graph to the branch name.
+        if _node_name(sink) in self._node_values:
+            node_values = self._node_values[_node_name(sink)]
+            del self._node_values[_node_name(sink)]
+            self._node_values[_node_name(branch)] = node_values
 
         self.graph = graph
 

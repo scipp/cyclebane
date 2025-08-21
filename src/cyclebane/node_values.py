@@ -54,14 +54,25 @@ class NodeValues(Mapping[Hashable, ValueArray]):
     def __setitem__(self, key: Hashable, value_array: ValueArray) -> None:
         """Add a single value array, checking for conflicts."""
         # Check if the value array is identical to existing one
-        existing_value = self._values.get(key)
-        if existing_value is not None:
-            if existing_value == value_array:
+        old_value = self._values.get(key)
+        if old_value is not None:
+            if old_value == value_array:
                 return  # No change needed
+            elif old_value.index_names == value_array.index_names:
+                for old_index, new_index in zip(
+                    old_value.indices.values(),
+                    value_array.indices.values(),
+                    strict=True,
+                ):
+                    if any(i != j for i, j in zip(old_index, new_index, strict=True)):
+                        raise ValueError(
+                            f"Node '{key}' has already been mapped with different "
+                            f"indices: existing {old_index} vs new {new_index}"
+                        )
+                # If indices match, we can replace the value
+                self._values[key] = value_array
             else:
-                del self._values[key]  # Remove existing value
-            # else:
-            #    raise ValueError(f"Node '{key}' has already been mapped")
+                raise ValueError(f"Node '{key}' has already been mapped")
 
         # Check for index conflicts
         existing_indices = self.indices
