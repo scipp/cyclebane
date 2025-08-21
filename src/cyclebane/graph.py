@@ -363,37 +363,56 @@ class Graph:
         value_attr:
             The name of the attribute on nodes that holds the array-like object.
         """
-        graph = self.graph
+        graph = self.graph.copy()
+
         regular_indices = dict(reversed(self.indices.items()))
         node_values = self._node_values.copy()
-        graphs_for_grouping = []
+        groupby_graphs = []
+        print('-' * 80)
+        for edge in graph.edges:
+            print(edge)
+        print('-' * 80)
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
-                # Subgraph of all ancestors and descendants
                 key = self._from_orig_key(key)
-                subgraph = graph.subgraph(
-                    nx.ancestors(graph, key) | nx.descendants(graph, key) | {key}
-                )
-                # Note how this will raise if there are multiple groupings of the same
-                # index name, or into the same index name. We could support this if it
-                # is compatible, but the current graph building approach would not work.
-                regular_indices.pop(grouping.index_name, None)
-                index = regular_indices.pop(grouping.group_index_name)
-                graphs = _clone_graph(subgraph, grouping.group_index_name, index)
-                subgraphs = [
-                    _clone_graph(group_graph, grouping.index_name, idx)
-                    for idx, group_graph in zip(grouping.indices, graphs, strict=True)
-                ]
-                # Flatten nested list of graphs
-                graphs = [g for sublist in subgraphs for g in sublist]
-                graphs_for_grouping.append(nx.compose_all(graphs))
-        if graphs_for_grouping:
-            # If we have grouping, we need to merge the graphs for each grouping
-            graph = nx.compose_all(graphs_for_grouping)
+                groupby_graph = graph.subgraph([*graph.predecessors(key), key]).copy()
+                graph.remove_edges_from(groupby_graph.edges)
+                for index_name, index in reversed(self.indices.items()):
+                    if index_name == grouping.index_name:
+                        continue
+                    graphs = _clone_graph(groupby_graph, index_name, index)
+                    if index_name == grouping.group_index_name:
+                        subgraphs = [
+                            _clone_graph(group_graph, grouping.index_name, idx)
+                            for idx, group_graph in zip(
+                                grouping.indices, graphs, strict=True
+                            )
+                        ]
+                        # Flatten nested list of graphs
+                        graphs = [g for sublist in subgraphs for g in sublist]
+                    groupby_graph = nx.compose_all(graphs)
+
+                # regular_indices.pop(grouping.index_name, None)
+                for node in groupby_graph.nodes:
+                    print(node)
+                for edge in groupby_graph.edges:
+                    print(edge)
+                groupby_graphs.append(groupby_graph)
+
+        # if groupby_graphs:
+        #    # If we have grouping, we need to merge the graphs for each grouping
+        #    graph = nx.compose_all(groupby_graphs)
+
+        print('-' * 80)
+        for node in graph.nodes:
+            print(node)
+        for edge in graph.edges:
+            print(edge)
         for index_name, index in regular_indices.items():
             graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
+        graph = nx.compose_all([*groupby_graphs, graph])
         # Remove all nodes that are MappedNode
         # graph = nx.subgraph_view(
         #    graph,
