@@ -10,6 +10,7 @@ from uuid import uuid4
 import networkx as nx
 
 from .node_values import IndexName, IndexValue, NodeValues
+from .value_array import Grouping
 
 
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
@@ -109,6 +110,12 @@ def _node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> Mapped
     if isinstance(node, MappedNode):
         return MappedNode(name=node.name, indices=indices + node.indices)
     return MappedNode(name=node, indices=indices)
+
+
+def _node_name(node: Hashable) -> Hashable:
+    if isinstance(node, MappedNode):
+        return node.name
+    return node
 
 
 def _node_indices(node: Hashable) -> tuple[IndexName, ...]:
@@ -265,6 +272,9 @@ class Graph:
             node_values=self._node_values.merge(new_values),
         )
 
+    def groupby(self, node: Hashable) -> GroupbyGraph:
+        return GroupbyGraph(self.graph, node_values=self._node_values, node=node)
+
     def reduce(
         self,
         key: None | Hashable = None,
@@ -273,6 +283,7 @@ class Graph:
         axis: None | int = None,
         name: None | Hashable = None,
         attrs: None | dict[str, Any] = None,
+        _extra_index_name: None | IndexName = None,
     ) -> Graph:
         """
         Reduce over the given index or axis previously created with :py:meth:`map`.
@@ -314,6 +325,11 @@ class Graph:
             new_index = tuple(value for i, value in enumerate(indices) if i != axis)
         else:
             new_index = None
+        if _extra_index_name is not None:
+            if new_index is None:
+                new_index = (_extra_index_name,)
+            else:
+                new_index = (*new_index, _extra_index_name)
         if name in self.graph:
             raise ValueError(f"Node '{name}' already exists in the graph.")
 
@@ -354,23 +370,37 @@ class Graph:
         value_attr:
             The name of the attribute on nodes that holds the array-like object.
         """
-        graph = self.graph
+        graph = self.graph.copy()
+
+        # Maintain a list of actual node values, without groupings, since we only want
+        # to set the former (user-provided) on (input) nodes.
+        node_values = self._node_values.copy()
+        groupby_graphs = []
+        # Handle groupby/reduce operations. The regular iterative node duplication does
+        # not work in this case. We have to handle the graph edges that correspond to
+        # a particular groupby/reduce operation in isolation, or else we get broken
+        # result in the presence of multiple (chained or not) groupby operations. The
+        # resulting graphs that correspond to the grouping are later composed with the
+        # rest of the graph.
+        for key, values in self._node_values.items():
+            if (grouping := values.get_grouping()) is not None:
+                del node_values[key]
+                key = self._from_orig_key(key)
+                # Note there should be only a single predecessor for the grouping node.
+                groupby_graph = graph.subgraph([*graph.predecessors(key), key]).copy()
+                # Remove edges, or the loop for the regular map/reduce will add
+                # all-to-all edges between these nodes
+                graph.remove_edges_from(groupby_graph.edges)
+                groupby_graphs.append(self._make_groupby_graph(grouping, groupby_graph))
+
+        # Handle regular map/reduce operations
         for index_name, index in reversed(self.indices.items()):
-            # Find all nodes with this index
-            nodes = [
-                node
-                for node in graph.nodes()
-                if index_name
-                in _node_indices(node.name if isinstance(node, NodeName) else node)
-            ]
-            # Make a copy for each index value
-            graphs = [
-                _rename_successors(
-                    graph, successors=nodes, index=IndexValues((index_name,), (i,))
-                )
-                for i in index
-            ]
+            graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
+
+        if groupby_graphs:
+            graph = nx.compose_all([*groupby_graphs, graph])
+
         # Replace all MappingNodes with their name
         new_names = {
             node: NodeName(node.name.name, node.index)
@@ -383,11 +413,28 @@ class Graph:
         for node in graph.nodes:
             if (
                 isinstance(node, NodeName)
-                and (node_values := self._node_values.get(node.name)) is not None
+                and (value_array := node_values.get(node.name)) is not None
             ):
-                graph.nodes[node][value_attr] = node_values.sel(node.index.to_tuple())
+                graph.nodes[node][value_attr] = value_array.sel(node.index.to_tuple())
 
         return graph
+
+    def _make_groupby_graph(
+        self, grouping: Grouping, groupby_graph: nx.DiGraph
+    ) -> nx.DiGraph:
+        for index_name, index in reversed(self.indices.items()):
+            if index_name == grouping.index_name:
+                continue
+            graphs = _clone_graph(groupby_graph, index_name, index)
+            if index_name == grouping.group_index_name:
+                subgraphs = [
+                    _clone_graph(group_graph, grouping.index_name, idx)
+                    for idx, group_graph in zip(grouping.indices, graphs, strict=True)
+                ]
+                # Flatten nested list of graphs
+                graphs = [g for sublist in subgraphs for g in sublist]
+            groupby_graph = nx.compose_all(graphs)
+        return groupby_graph
 
     def __getitem__(self, key: Hashable | slice) -> Graph:
         """
@@ -474,4 +521,87 @@ class Graph:
 
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
+
+        # Ensure we preserve the node values of the branch, if it exists. This step is
+        # necessary since __setitem__ effectively renames the sink node of the input
+        # graph to the branch name.
+        if _node_name(sink) in self._node_values:
+            node_values = self._node_values[_node_name(sink)]
+            del self._node_values[_node_name(sink)]
+            self._node_values[_node_name(branch)] = node_values
+
         self.graph = graph
+
+
+class GroupbyGraph:
+    """
+    A graph that has been grouped by a specific index.
+
+    This is a specialized graph that is used to represent the result of a groupby
+    operation on a Cyclebane graph. It allows for operations on the grouped data,
+    such as aggregation or summarization.
+    """
+
+    # TODO Should we support a custom new dim name here, instead of using `node`?
+    def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
+        self._graph = graph
+        self._node_values = node_values
+        values_to_group_by = node_values[node]
+        self._group_index_name = node
+        self._index_name = values_to_group_by.index_names[0]
+        self._groups = values_to_group_by.group(index_name=node)
+
+    # TODO Require specifying index!?
+    def reduce(
+        self,
+        key: None | Hashable = None,
+        *,
+        name: None | Hashable = None,
+        attrs: None | dict[str, Any] = None,
+    ) -> Graph:
+        """
+        Reduce the grouped graph over the given index or axis.
+
+        Parameters
+        ----------
+        key:
+            The name of the source node to reduce. This is the original name prior to
+            mapping. If not given, tries to find a unique sink node.
+        name:
+            The name of the new node. If not given, a unique name is generated.
+        attrs:
+            Attributes to set on the new node(s).
+        """
+        # Generate name here since we want to store grouping on the new "reduce" node.
+        name = name or _get_new_node_name(self._graph)
+        # Why do we store the grouping here? This works well with existing mechanisms,
+        # e.g., __getitem__, which needs to decided what subset of node values to keep
+        # when returning a subgraph.
+        node_values = self._node_values.merge({name: self._groups})
+        graph = Graph(self._graph, node_values=node_values)
+        return graph.reduce(
+            key=key,
+            index=self._index_name,
+            name=name,
+            attrs=attrs,
+            _extra_index_name=self._group_index_name,
+        )
+
+
+def _clone_graph(
+    graph: nx.DiGraph, index_name: IndexName, index: Iterable[IndexValue]
+) -> list[nx.DiGraph]:
+    # Find all nodes with this index
+    nodes = [
+        node
+        for node in graph.nodes()
+        if index_name
+        in _node_indices(node.name if isinstance(node, NodeName) else node)
+    ]
+    # Make a copy for each index value
+    return [
+        _rename_successors(
+            graph, successors=nodes, index=IndexValues((index_name,), (i,))
+        )
+        for i in index
+    ]
