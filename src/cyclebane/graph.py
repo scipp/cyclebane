@@ -376,14 +376,24 @@ class Graph:
         # to set the former (user-provided) on (input) nodes.
         node_values = self._node_values.copy()
         groupby_graphs = []
+        # Handle groupby/reduce operations. The regular iterative node duplication does
+        # not work in this case. We have to handle the graph edges that correspond to
+        # a particular groupby/reduce operation in isolation, or else we get broken
+        # result in the presence of multiple (chained or not) groupby operations. The
+        # resulting graphs that correspond to the grouping are later composed with the
+        # rest of the graph.
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
                 key = self._from_orig_key(key)
+                # Note there should be only a single predecessor for the grouping node.
                 groupby_graph = graph.subgraph([*graph.predecessors(key), key]).copy()
+                # Remove edges, or the loop for the regular map/reduce will add
+                # all-to-all edges between these nodes
                 graph.remove_edges_from(groupby_graph.edges)
                 groupby_graphs.append(self._make_groupby_graph(grouping, groupby_graph))
 
+        # Handle regular map/reduce operations
         for index_name, index in reversed(self.indices.items()):
             graphs = _clone_graph(graph, index_name, index)
             graph = nx.compose_all(graphs)
