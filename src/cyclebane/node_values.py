@@ -64,7 +64,9 @@ class NodeValues(Mapping[Hashable, ValueArray]):
                     value_array.indices.values(),
                     strict=True,
                 ):
-                    if any(i != j for i, j in zip(old_index, new_index, strict=True)):
+                    if (len(old_index) != len(new_index)) or any(
+                        i != j for i, j in zip(old_index, new_index, strict=True)
+                    ):
                         raise ValueError(
                             f"Node '{key}' has already been mapped with different "
                             f"indices: existing {old_index} vs new {new_index}"

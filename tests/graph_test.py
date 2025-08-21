@@ -923,16 +923,14 @@ def test_setitem_allows_compatible_node_values(node_values) -> None:
     assert len(mapped.index_names) == 1
 
 
-def test_setitem_raises_if_node_values_equivalent_but_of_different_type() -> None:
+def test_setitem_allows_changing_node_values() -> None:
     g = nx.DiGraph()
     g.add_edge('a', 'b')
     graph = cb.Graph(g)
     mapped1 = graph.map({'a': [1, 2]}).reduce('b', name='d')
-    mapped2 = graph.map({'a': np.array([1, 2])}).reduce('b', name='d')
-    # One could imagine treating this as equivalent, but we are strict in the
-    # comparison.
-    with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
-        mapped1['x'] = mapped2['d']
+    mapped2 = graph.map({'a': [1, 3]}).reduce('b', name='d')
+    mapped1['x'] = mapped2['d']
+    assert len(mapped1.index_names) == 1
 
 
 def test_setitem_raises_if_node_values_incompatible() -> None:
