@@ -340,7 +340,9 @@ class Graph:
 
         return Graph(graph, node_values=self._node_values)
 
-    def _from_orig_key(self, key: Hashable) -> Hashable:
+    def _from_orig_key(
+        self, key: Hashable, match_index: None | Hashable = None
+    ) -> Hashable:
         # Graph.map relabels nodes to include index names, which can be inconvenient
         # for the user. Is this convenience of finding the node by its original name
         # worth the complexity and a good idea?
@@ -350,6 +352,8 @@ class Graph:
                 for node in self.graph.nodes
                 if isinstance(node, MappedNode) and node.name == key
             ]
+            if match_index is not None:
+                matches = [node for node in matches if match_index in node.indices]
             if len(matches) == 0:
                 raise KeyError(f"Node '{key}' does not exist in the graph.")
             if len(matches) > 1:
@@ -385,7 +389,7 @@ class Graph:
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
-                key = self._from_orig_key(key)
+                key = self._from_orig_key(key, match_index=grouping.group_index_name)
                 # Note there should be only a single predecessor for the grouping node.
                 groupby_graph = graph.subgraph([*graph.predecessors(key), key]).copy()
                 # Remove edges, or the loop for the regular map/reduce will add
