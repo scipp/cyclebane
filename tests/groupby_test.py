@@ -688,3 +688,108 @@ class TestGroupbyChainedOperations:
         # Grouped nodes should exist
         assert idx('c_grouped', 'x', dims=('param',)) in result.nodes
         assert idx('c_grouped', 'y', dims=('param',)) in result.nodes
+
+
+class TestGroupbyWith2DNodes:
+    """Tests for groupby operations on 2-D nodes (nodes with two dimensions)."""
+
+    def test_2d_node_regular_reduce_then_groupby_reduce(self) -> None:
+        """Test 2-D node → regular reduce along one dim → groupby-reduce the other."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'c')
+
+        # Create 2-D node by mapping twice
+        graph = cb.Graph(g)
+        mapped = graph.map({'a': [1, 2, 3]}).map({'b': [10, 20]})
+        # Now 'c' has 2 dimensions: dim_0 (length 3) and dim_1 (length 2)
+
+        # First: regular reduce along dim_1
+        reduced = mapped.reduce('c', name='reduced_c', index='dim_1')
+
+        # Now 'reduced_c' has only dim_0, and we also have a 'b' column with values
+        # Add grouping parameter aligned with dim_0
+        reduced = reduced.map(
+            pd.DataFrame({'param': ['x', 'x', 'y']}).set_index(
+                pd.RangeIndex(3, name='dim_0')
+            )
+        )
+
+        # Second: groupby-reduce along the remaining dimension
+        grouped = reduced.groupby('param').reduce('reduced_c', name='final')
+        result = grouped.to_networkx()
+
+        # Check that final grouped nodes exist
+        assert idx('final', 'x', dims=('param',)) in result.nodes
+        assert idx('final', 'y', dims=('param',)) in result.nodes
+
+        # Check that reduced_c nodes exist (one per dim_0 value)
+        assert idx('reduced_c', 0, dims=('dim_0',)) in result.nodes
+        assert idx('reduced_c', 1, dims=('dim_0',)) in result.nodes
+        assert idx('reduced_c', 2, dims=('dim_0',)) in result.nodes
+
+        # Check edges: reduced_c nodes should connect to appropriate final groups
+        assert result.has_edge(
+            idx('reduced_c', 0, dims=('dim_0',)), idx('final', 'x', dims=('param',))
+        )
+        assert result.has_edge(
+            idx('reduced_c', 1, dims=('dim_0',)), idx('final', 'x', dims=('param',))
+        )
+        assert result.has_edge(
+            idx('reduced_c', 2, dims=('dim_0',)), idx('final', 'y', dims=('param',))
+        )
+
+    def test_2d_node_groupby_then_regular_reduce(self) -> None:
+        """Test 2-D node → groupby along one dim → regular reduce the other."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'c')
+
+        # Create 2-D node with grouping parameter
+        df = pd.DataFrame(
+            {
+                'a': [1, 2, 3],
+                'param': ['x', 'x', 'y'],  # Will group dim_0
+            }
+        )
+        graph = cb.Graph(g).map(df).map({'b': [10, 20]})
+        # Now 'c' has 2 dimensions: dim_0 (length 3) and dim_1 (length 2)
+
+        # First: groupby along dim_0 (using param)
+        grouped = graph.groupby('param').reduce('c', name='grouped_c')
+        # Now 'grouped_c' has only param dimension, but we still have dim_1
+
+        # To perform regular reduce, we need to work with the grouped result
+        # The grouped graph should still have dim_1 in its structure
+        # Let's reduce along dim_1 within each group
+        final = grouped.reduce('grouped_c', name='final', index='dim_1')
+        result = final.to_networkx()
+
+        # Check that final nodes exist (one per group, no dim_1)
+        assert idx('final', 'x', dims=('param',)) in result.nodes
+        assert idx('final', 'y', dims=('param',)) in result.nodes
+
+        # Check intermediate grouped_c nodes exist (one per group per dim_1)
+        # Note: axis order is (dim_1, param) not (param, dim_1)
+        assert idx('grouped_c', 0, 'x', dims=('dim_1', 'param')) in result.nodes
+        assert idx('grouped_c', 1, 'x', dims=('dim_1', 'param')) in result.nodes
+        assert idx('grouped_c', 0, 'y', dims=('dim_1', 'param')) in result.nodes
+        assert idx('grouped_c', 1, 'y', dims=('dim_1', 'param')) in result.nodes
+
+        # Check edges: grouped_c nodes should connect to final reduced nodes
+        assert result.has_edge(
+            idx('grouped_c', 0, 'x', dims=('dim_1', 'param')),
+            idx('final', 'x', dims=('param',)),
+        )
+        assert result.has_edge(
+            idx('grouped_c', 1, 'x', dims=('dim_1', 'param')),
+            idx('final', 'x', dims=('param',)),
+        )
+        assert result.has_edge(
+            idx('grouped_c', 0, 'y', dims=('dim_1', 'param')),
+            idx('final', 'y', dims=('param',)),
+        )
+        assert result.has_edge(
+            idx('grouped_c', 1, 'y', dims=('dim_1', 'param')),
+            idx('final', 'y', dims=('param',)),
+        )
