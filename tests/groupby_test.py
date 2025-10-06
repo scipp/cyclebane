@@ -180,11 +180,6 @@ def test_group_in_different_ways() -> None:
     grouped.to_networkx()
 
 
-# ============================================================================
-# BASIC FUNCTIONALITY TESTS
-# ============================================================================
-
-
 class TestGroupbyBasicFunctionality:
     """Tests for basic groupby functionality with different group configurations."""
 
@@ -439,11 +434,6 @@ class TestGroupbyIntegration:
         assert idx('reduced', 'y', dims=('param',)) in result.nodes
 
 
-# ============================================================================
-# EDGE CASES AND ERROR HANDLING TESTS
-# ============================================================================
-
-
 class TestGroupbyEdgeCases:
     """Tests for groupby edge cases and error handling."""
 
@@ -523,11 +513,6 @@ class TestGroupbyEdgeCases:
         assert result.nodes[idx('param', 2)]['value'] == 'y'
 
 
-# ============================================================================
-# COMPLEX SCENARIO TESTS
-# ============================================================================
-
-
 class TestGroupbyComplexScenarios:
     """Tests for complex groupby scenarios."""
 
@@ -603,11 +588,6 @@ class TestGroupbyComplexScenarios:
         # Grouped nodes
         assert idx('d', 'x', dims=('param',)) in result.nodes
         assert idx('d', 'y', dims=('param',)) in result.nodes
-
-
-# ============================================================================
-# CHAINED GROUPBY OPERATIONS TESTS
-# ============================================================================
 
 
 class TestGroupbyChainedOperations:
