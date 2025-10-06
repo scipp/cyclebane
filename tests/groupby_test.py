@@ -178,3 +178,533 @@ def test_group_in_different_ways() -> None:
 
     # with pytest.raises(KeyError, match='dim_0'):
     grouped.to_networkx()
+
+
+# ============================================================================
+# BASIC FUNCTIONALITY TESTS
+# ============================================================================
+
+
+class TestGroupbyBasicFunctionality:
+    """Tests for basic groupby functionality with different group configurations."""
+
+    def test_groupby_with_different_number_of_groups(self) -> None:
+        """Test groupby with 2, 3, and many groups."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        # Test with 3 groups
+        df = pd.DataFrame(
+            {'a': [1, 2, 3, 4, 5, 6], 'param': ['x', 'x', 'y', 'y', 'z', 'z']}
+        )
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        assert result.nodes[idx('c', 'x', dims=('param',))] == {}
+        assert result.nodes[idx('c', 'y', dims=('param',))] == {}
+        assert result.nodes[idx('c', 'z', dims=('param',))] == {}
+
+        # Verify correct grouping
+        assert result.has_edge(idx('b', 0), idx('c', 'x', dims=('param',)))
+        assert result.has_edge(idx('b', 1), idx('c', 'x', dims=('param',)))
+        assert result.has_edge(idx('b', 2), idx('c', 'y', dims=('param',)))
+        assert result.has_edge(idx('b', 3), idx('c', 'y', dims=('param',)))
+        assert result.has_edge(idx('b', 4), idx('c', 'z', dims=('param',)))
+        assert result.has_edge(idx('b', 5), idx('c', 'z', dims=('param',)))
+
+    def test_groupby_single_group(self) -> None:
+        """Test groupby where all values belong to the same group."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame(
+            {'a': [1, 2, 3, 4], 'param': ['same', 'same', 'same', 'same']}
+        )
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        # Should have only one group
+        assert result.nodes[idx('c', 'same', dims=('param',))] == {}
+
+        # All b nodes should connect to the single group
+        assert result.has_edge(idx('b', 0), idx('c', 'same', dims=('param',)))
+        assert result.has_edge(idx('b', 1), idx('c', 'same', dims=('param',)))
+        assert result.has_edge(idx('b', 2), idx('c', 'same', dims=('param',)))
+        assert result.has_edge(idx('b', 3), idx('c', 'same', dims=('param',)))
+
+    def test_groupby_single_element_per_group(self) -> None:
+        """Test groupby where each group has only one element."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [1, 2, 3], 'param': ['x', 'y', 'z']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        # Should have three groups, each with one element
+        assert result.nodes[idx('c', 'x', dims=('param',))] == {}
+        assert result.nodes[idx('c', 'y', dims=('param',))] == {}
+        assert result.nodes[idx('c', 'z', dims=('param',))] == {}
+
+        # Each b node connects to its own group
+        assert result.has_edge(idx('b', 0), idx('c', 'x', dims=('param',)))
+        assert result.has_edge(idx('b', 1), idx('c', 'y', dims=('param',)))
+        assert result.has_edge(idx('b', 2), idx('c', 'z', dims=('param',)))
+
+
+class TestGroupbyDataTypes:
+    """Tests for groupby with different data types."""
+
+    def test_groupby_with_integer_groups(self) -> None:
+        """Test groupby with integer group values."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [10, 20, 30, 40], 'group': [0, 0, 1, 1]})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('group').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        assert result.nodes[idx('c', 0, dims=('group',))] == {}
+        assert result.nodes[idx('c', 1, dims=('group',))] == {}
+
+        assert result.has_edge(idx('b', 0), idx('c', 0, dims=('group',)))
+        assert result.has_edge(idx('b', 1), idx('c', 0, dims=('group',)))
+        assert result.has_edge(idx('b', 2), idx('c', 1, dims=('group',)))
+        assert result.has_edge(idx('b', 3), idx('c', 1, dims=('group',)))
+
+    def test_groupby_with_float_groups(self) -> None:
+        """Test groupby with float group values."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [10, 20, 30], 'group': [1.5, 1.5, 2.5]})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('group').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        assert result.nodes[idx('c', 1.5, dims=('group',))] == {}
+        assert result.nodes[idx('c', 2.5, dims=('group',))] == {}
+
+        assert result.has_edge(idx('b', 0), idx('c', 1.5, dims=('group',)))
+        assert result.has_edge(idx('b', 1), idx('c', 1.5, dims=('group',)))
+        assert result.has_edge(idx('b', 2), idx('c', 2.5, dims=('group',)))
+
+    def test_groupby_with_named_index(self) -> None:
+        """Test groupby with a Pandas Series that has a named index."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [10, 20, 30], 'param': ['x', 'x', 'y']})
+        df.index.name = 'my_index'
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        # Index name should be used
+        assert idx('a', 0, dims=('my_index',)) in result.nodes
+        assert idx('c', 'x', dims=('param',)) in result.nodes
+
+    def test_groupby_error_with_non_pandas_type(self) -> None:
+        """Test that groupby raises NotImplementedError for non-Pandas types."""
+        import pytest
+
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        # Try with a list (SequenceAdapter)
+        graph = cb.Graph(g).map({'a': [1, 2, 3]})
+
+        # Error is raised in groupby() call itself, not reduce()
+        with pytest.raises(NotImplementedError, match='only implemented for Pandas'):
+            graph.groupby('a')
+
+
+class TestGroupbyGraphStructure:
+    """Tests for groupby with different graph structures."""
+
+    def test_groupby_with_multiple_predecessors(self) -> None:
+        """Test groupby on a node with multiple predecessors."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'c')
+
+        df = pd.DataFrame({'a': [1, 2, 3], 'b': [10, 20, 30], 'param': ['x', 'x', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('c', name='d')
+        result = grouped.to_networkx()
+
+        # Both predecessors should have their nodes
+        assert idx('a', 0) in result.nodes
+        assert idx('b', 0) in result.nodes
+
+        # Grouped nodes should exist
+        assert idx('d', 'x', dims=('param',)) in result.nodes
+        assert idx('d', 'y', dims=('param',)) in result.nodes
+
+        # Edges from both predecessors to c
+        assert result.has_edge(idx('a', 0), idx('c', 0))
+        assert result.has_edge(idx('b', 0), idx('c', 0))
+
+    def test_groupby_on_intermediate_node(self) -> None:
+        """Test groupby on an intermediate node (not immediately after map)."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+        g.add_edge('b', 'c')
+
+        df = pd.DataFrame({'a': [1, 2, 3, 4], 'param': ['x', 'x', 'y', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('c', name='d')
+        result = grouped.to_networkx()
+
+        # All intermediate nodes should exist
+        assert idx('a', 0) in result.nodes
+        assert idx('b', 0) in result.nodes
+        assert idx('c', 0) in result.nodes
+
+        # Chain should be preserved
+        assert result.has_edge(idx('a', 0), idx('b', 0))
+        assert result.has_edge(idx('b', 0), idx('c', 0))
+
+        # Grouped nodes
+        assert result.has_edge(idx('c', 0), idx('d', 'x', dims=('param',)))
+        assert result.has_edge(idx('c', 1), idx('d', 'x', dims=('param',)))
+
+    def test_groupby_with_attrs(self) -> None:
+        """Test that attrs are correctly set on reduce nodes."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [1, 2, 3], 'param': ['x', 'x', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce(
+            'b', name='c', attrs={'custom': 'value'}
+        )
+        result = grouped.to_networkx()
+
+        # Attrs should be set on the reduce nodes
+        assert result.nodes[idx('c', 'x', dims=('param',))]['custom'] == 'value'
+        assert result.nodes[idx('c', 'y', dims=('param',))]['custom'] == 'value'
+
+
+class TestGroupbyIntegration:
+    """Tests for groupby integrated with other operations."""
+
+    def test_groupby_combined_with_regular_reduce(self) -> None:
+        """Test groupby combined with regular reduce in the same graph."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+        g.add_edge('c', 'd')
+
+        df = pd.DataFrame({'a': [1, 2, 3], 'c': [10, 20, 30], 'param': ['x', 'x', 'y']})
+        graph = cb.Graph(g).map(df)
+
+        # Regular reduce on one branch
+        reduced = graph.reduce('b', name='b_reduced')
+
+        # Groupby reduce on another branch
+        grouped = reduced.groupby('param').reduce('d', name='d_grouped')
+        result = grouped.to_networkx()
+
+        # Regular reduce node should exist (single node, no index)
+        assert 'b_reduced' in result.nodes
+
+        # Grouped reduce nodes should exist
+        assert idx('d_grouped', 'x', dims=('param',)) in result.nodes
+        assert idx('d_grouped', 'y', dims=('param',)) in result.nodes
+
+    def test_groupby_with_branch_operations(self) -> None:
+        """Test groupby combined with branch selection."""
+        g1 = nx.DiGraph()
+        g1.add_edge('a', 'b')
+
+        g2 = nx.DiGraph()
+        g2.add_edge('c', 'd')
+
+        df = pd.DataFrame({'a': [1, 2, 3], 'c': [10, 20, 30], 'param': ['x', 'x', 'y']})
+        graph1 = cb.Graph(g1).map(df)
+        graph2 = cb.Graph(g2).map(df)
+
+        # Combine graphs
+        graph1['c'] = graph2['d']
+
+        # Groupby on combined graph
+        grouped = graph1.groupby('param').reduce('b', name='reduced')
+        result = grouped.to_networkx()
+
+        assert idx('reduced', 'x', dims=('param',)) in result.nodes
+        assert idx('reduced', 'y', dims=('param',)) in result.nodes
+
+
+# ============================================================================
+# EDGE CASES AND ERROR HANDLING TESTS
+# ============================================================================
+
+
+class TestGroupbyEdgeCases:
+    """Tests for groupby edge cases and error handling."""
+
+    def test_groupby_on_nonexistent_node(self) -> None:
+        """Test that groupby raises KeyError for non-existent node."""
+        import pytest
+
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [1, 2, 3]})
+        graph = cb.Graph(g).map(df)
+
+        with pytest.raises(KeyError):
+            graph.groupby('nonexistent')
+
+    def test_groupby_reduce_with_name_conflict(self) -> None:
+        """Test that reduce after groupby raises error for existing node name."""
+        import pytest
+
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        df = pd.DataFrame({'a': [1, 2, 3], 'param': ['x', 'x', 'y']})
+        graph = cb.Graph(g).map(df)
+
+        # Error message says "already been mapped" not "already exists"
+        with pytest.raises(ValueError, match="already been mapped"):
+            graph.groupby('param').reduce('b', name='a')
+
+    def test_groupby_with_uneven_group_sizes(self) -> None:
+        """Test groupby where groups have very different sizes."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+
+        # One group with 5 elements, another with 1
+        df = pd.DataFrame(
+            {'a': [1, 2, 3, 4, 5, 6], 'param': ['x', 'x', 'x', 'x', 'x', 'y']}
+        )
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        # Both groups should exist
+        assert idx('c', 'x', dims=('param',)) in result.nodes
+        assert idx('c', 'y', dims=('param',)) in result.nodes
+
+        # Check edges - group 'x' should have 5 incoming edges
+        edges_to_x = [
+            edge for edge in result.edges if edge[1] == idx('c', 'x', dims=('param',))
+        ]
+        assert len(edges_to_x) == 5
+
+        # Group 'y' should have 1 incoming edge
+        edges_to_y = [
+            edge for edge in result.edges if edge[1] == idx('c', 'y', dims=('param',))
+        ]
+        assert len(edges_to_y) == 1
+
+    def test_groupby_preserves_node_values(self) -> None:
+        """Test that groupby preserves node values from original mapping."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+        g.add_edge('param', 'b')
+
+        df = pd.DataFrame({'a': [11, 22, 33], 'param': ['x', 'x', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('b', name='c')
+        result = grouped.to_networkx()
+
+        # Original node values should be preserved
+        assert result.nodes[idx('a', 0)]['value'] == 11
+        assert result.nodes[idx('a', 1)]['value'] == 22
+        assert result.nodes[idx('a', 2)]['value'] == 33
+        assert result.nodes[idx('param', 0)]['value'] == 'x'
+        assert result.nodes[idx('param', 1)]['value'] == 'x'
+        assert result.nodes[idx('param', 2)]['value'] == 'y'
+
+
+# ============================================================================
+# COMPLEX SCENARIO TESTS
+# ============================================================================
+
+
+class TestGroupbyComplexScenarios:
+    """Tests for complex groupby scenarios."""
+
+    def test_groupby_diamond_pattern(self) -> None:
+        """Test groupby in a diamond-shaped graph."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'd')
+        g.add_edge('c', 'd')
+
+        df = pd.DataFrame({'a': [1, 2, 3, 4], 'param': ['x', 'x', 'y', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('d', name='e')
+        result = grouped.to_networkx()
+
+        # Both intermediate nodes should exist
+        assert idx('b', 0) in result.nodes
+        assert idx('c', 0) in result.nodes
+
+        # Grouped nodes
+        assert idx('e', 'x', dims=('param',)) in result.nodes
+        assert idx('e', 'y', dims=('param',)) in result.nodes
+
+        # Diamond structure should be preserved
+        assert result.has_edge(idx('a', 0), idx('b', 0))
+        assert result.has_edge(idx('a', 0), idx('c', 0))
+        assert result.has_edge(idx('b', 0), idx('d', 0))
+        assert result.has_edge(idx('c', 0), idx('d', 0))
+
+    def test_groupby_linear_chain(self) -> None:
+        """Test groupby on a long linear chain."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+        g.add_edge('b', 'c')
+        g.add_edge('c', 'd')
+        g.add_edge('d', 'e')
+
+        df = pd.DataFrame({'a': [1, 2, 3, 4], 'param': ['x', 'x', 'y', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('e', name='f')
+        result = grouped.to_networkx()
+
+        # All intermediate nodes should exist
+        assert idx('a', 0) in result.nodes
+        assert idx('b', 0) in result.nodes
+        assert idx('c', 0) in result.nodes
+        assert idx('d', 0) in result.nodes
+        assert idx('e', 0) in result.nodes
+
+        # Chain should be preserved
+        assert result.has_edge(idx('a', 0), idx('b', 0))
+        assert result.has_edge(idx('b', 0), idx('c', 0))
+        assert result.has_edge(idx('c', 0), idx('d', 0))
+        assert result.has_edge(idx('d', 0), idx('e', 0))
+
+    def test_groupby_with_multiple_source_nodes(self) -> None:
+        """Test groupby where graph has multiple source nodes."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'c')
+        g.add_edge('b', 'c')
+        # Note: both 'a' and 'b' are source nodes
+
+        df = pd.DataFrame({'a': [1, 2], 'b': [10, 20], 'param': ['x', 'y']})
+        graph = cb.Graph(g).map(df)
+        grouped = graph.groupby('param').reduce('c', name='d')
+        result = grouped.to_networkx()
+
+        # Both source nodes should exist
+        assert idx('a', 0) in result.nodes
+        assert idx('b', 0) in result.nodes
+
+        # Grouped nodes
+        assert idx('d', 'x', dims=('param',)) in result.nodes
+        assert idx('d', 'y', dims=('param',)) in result.nodes
+
+
+# ============================================================================
+# CHAINED GROUPBY OPERATIONS TESTS
+# ============================================================================
+
+
+class TestGroupbyChainedOperations:
+    """Tests for chained groupby and other operations."""
+
+    def test_three_groupby_operations_in_sequence(self) -> None:
+        """Test three consecutive groupby operations."""
+        g1 = nx.DiGraph()
+        g1.add_edge('a', 'b')
+
+        g2 = nx.DiGraph()
+        g2.add_edge('c', 'd')
+
+        g3 = nx.DiGraph()
+        g3.add_edge('e', 'f')
+
+        # First groupby
+        grouped1 = (
+            cb.Graph(g1)
+            .map(pd.DataFrame({'a': [1, 2, 3, 4], 'p1': ['x', 'x', 'y', 'y']}))
+            .groupby('p1')
+            .reduce('b', name='gb1')
+        )
+
+        # Second groupby - use branch selection to get single sink
+        mapped2 = cb.Graph(g2).map(
+            pd.DataFrame({'c': [10, 20], 'p1': ['x', 'y'], 'p2': [0, 1]}).set_index(
+                'p1'
+            )
+        )
+        mapped2['c'] = grouped1['gb1']
+        grouped2 = mapped2.groupby('p2').reduce('d', name='gb2')
+
+        # Third groupby - use branch selection to get single sink
+        mapped3 = cb.Graph(g3).map(
+            pd.DataFrame({'e': [100, 200], 'p2': [0, 1], 'p3': ['A', 'B']}).set_index(
+                'p2'
+            )
+        )
+        mapped3['e'] = grouped2['gb2']
+        grouped3 = mapped3.groupby('p3').reduce('f', name='gb3')
+
+        result = grouped3.to_networkx()
+
+        # Final grouped nodes should exist
+        assert idx('gb3', 'A', dims=('p3',)) in result.nodes
+        assert idx('gb3', 'B', dims=('p3',)) in result.nodes
+
+    def test_groupby_then_map_then_groupby(self) -> None:
+        """Test map → groupby → map → groupby sequence."""
+        g1 = nx.DiGraph()
+        g1.add_edge('a', 'b')
+
+        g2 = nx.DiGraph()
+        g2.add_edge('c', 'd')
+
+        # First: map and groupby
+        grouped1 = (
+            cb.Graph(g1)
+            .map(pd.DataFrame({'a': [1, 2, 3], 'p1': ['x', 'x', 'y']}))
+            .groupby('p1')
+            .reduce('b', name='gb1')
+        )
+
+        # Then: map again and groupby again - use branch selection
+        mapped2 = cb.Graph(g2).map(
+            pd.DataFrame({'c': [10, 20], 'p1': ['x', 'y'], 'p2': [0, 0]}).set_index(
+                'p1'
+            )
+        )
+        mapped2['c'] = grouped1['gb1']
+        grouped2 = mapped2.groupby('p2').reduce('d', name='gb2')
+
+        result = grouped2.to_networkx()
+
+        # Should have single group for p2
+        assert idx('gb2', 0, dims=('p2',)) in result.nodes
+
+    def test_regular_reduce_then_groupby(self) -> None:
+        """Test that regular reduce followed by groupby works."""
+        g = nx.DiGraph()
+        g.add_edge('a', 'b')
+        g.add_edge('b', 'c')
+
+        df = pd.DataFrame({'a': [1, 2, 3, 4], 'param': ['x', 'x', 'y', 'y']})
+        graph = cb.Graph(g).map(df)
+
+        # Regular reduce first
+        reduced = graph.reduce('b', name='b_reduced')
+
+        # Then groupby
+        grouped = reduced.groupby('param').reduce('c', name='c_grouped')
+        result = grouped.to_networkx()
+
+        # Regular reduce node should exist
+        assert 'b_reduced' in result.nodes
+
+        # Grouped nodes should exist
+        assert idx('c_grouped', 'x', dims=('param',)) in result.nodes
+        assert idx('c_grouped', 'y', dims=('param',)) in result.nodes
