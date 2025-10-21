@@ -147,15 +147,16 @@ class TestNodeValuesMerge:
         assert len(merged) == 1
         assert merged is not node_values  # Should return new object (copy)
 
-    def test_merge_existing_node_different_value_raises(self):
+    def test_merge_existing_node_different_value_works(self):
         """Re-adding existing node with different value."""
         initial_values = {'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)}
         node_values = NodeValues(initial_values)
 
         new_values = {'a': ValueArray.from_array_like([4, 5, 6], axis_zero=0)}
 
-        with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
-            node_values.merge(new_values)
+        merged = node_values.merge(new_values)
+        assert len(merged) == 1
+        assert merged['a'] == new_values['a']  # Should update value
 
     def test_merge_empty_new_values(self):
         """Merging empty mapping."""
@@ -194,7 +195,7 @@ class TestNodeValuesMerge:
         ):
             node_values.merge(new_values)
 
-    def test_merge_multiple_new_nodes_one_existing_raises(self):
+    def test_merge_multiple_new_nodes_one_existing_compatible_index(self):
         """Multiple new nodes where one already exists."""
         initial_values = {'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)}
         node_values = NodeValues(initial_values)
@@ -202,11 +203,30 @@ class TestNodeValuesMerge:
         new_values = {
             'a': ValueArray.from_array_like(
                 [4, 5, 6], axis_zero=0
-            ),  # Exists but different
+            ),  # Exists but different values
             'b': ValueArray.from_array_like([7, 8, 9], axis_zero=1),  # New
         }
 
-        with pytest.raises(ValueError, match="Node 'a' has already been mapped"):
+        merged = node_values.merge(new_values)
+        assert len(merged) == 2
+        assert set(merged.keys()) == {'a', 'b'}
+        assert merged['a'].sel((('dim_0', 0),)) == 4  # Updated value
+
+    def test_merge_multiple_new_nodes_one_existing_raises(self):
+        """Multiple new nodes where one already exists."""
+        initial_values = {'a': ValueArray.from_array_like([1, 2, 3], axis_zero=0)}
+        node_values = NodeValues(initial_values)
+
+        new_values = {
+            'a': ValueArray.from_array_like([4, 5, 6, 8], axis_zero=0)[
+                {'dim_0': slice(1, 4)}  # Make a slice to obtain an index value conflict
+            ],  # Exists but different
+            'b': ValueArray.from_array_like([7, 8, 9], axis_zero=1),  # New
+        }
+
+        with pytest.raises(
+            ValueError, match="Node 'a' has already been mapped with different indices"
+        ):
             node_values.merge(new_values)
 
     def test_merge_partial_index_overlap_compatible(self):
