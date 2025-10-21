@@ -184,7 +184,7 @@ class TestGroupbyBasicFunctionality:
     """Tests for basic groupby functionality with different group configurations."""
 
     def test_groupby_with_different_number_of_groups(self) -> None:
-        """Test groupby with 2, 3, and many groups."""
+        """Test groupby with 3 groups."""
         g = nx.DiGraph()
         g.add_edge('a', 'b')
 
@@ -220,7 +220,14 @@ class TestGroupbyBasicFunctionality:
         grouped = graph.groupby('param').reduce('b', name='c')
         result = grouped.to_networkx()
 
-        # Should have only one group
+        # Verify exactly one group exists (and only one)
+        c_nodes = [
+            node
+            for node in result.nodes
+            if isinstance(node, cb.graph.NodeName) and node.name == 'c'
+        ]
+        assert len(c_nodes) == 1
+        assert c_nodes[0] == idx('c', 'same', dims=('param',))
         assert result.nodes[idx('c', 'same', dims=('param',))] == {}
 
         # All b nodes should connect to the single group
@@ -340,9 +347,20 @@ class TestGroupbyGraphStructure:
         assert idx('d', 'x', dims=('param',)) in result.nodes
         assert idx('d', 'y', dims=('param',)) in result.nodes
 
-        # Edges from both predecessors to c
+        # Edges from both predecessors to c (for all indices)
         assert result.has_edge(idx('a', 0), idx('c', 0))
         assert result.has_edge(idx('b', 0), idx('c', 0))
+        assert result.has_edge(idx('a', 1), idx('c', 1))
+        assert result.has_edge(idx('b', 1), idx('c', 1))
+        assert result.has_edge(idx('a', 2), idx('c', 2))
+        assert result.has_edge(idx('b', 2), idx('c', 2))
+
+        # Edges from c to grouped d nodes (for 'x' group)
+        assert result.has_edge(idx('c', 0), idx('d', 'x', dims=('param',)))
+        assert result.has_edge(idx('c', 1), idx('d', 'x', dims=('param',)))
+
+        # Edges from c to grouped d nodes (for 'y' group)
+        assert result.has_edge(idx('c', 2), idx('d', 'y', dims=('param',)))
 
     def test_groupby_on_intermediate_node(self) -> None:
         """Test groupby on an intermediate node (not immediately after map)."""
@@ -389,7 +407,7 @@ class TestGroupbyIntegration:
     """Tests for groupby integrated with other operations."""
 
     def test_groupby_combined_with_regular_reduce(self) -> None:
-        """Test groupby combined with regular reduce in the same graph."""
+        """Test groupby and regular reduce on separate disconnected branches."""
         g = nx.DiGraph()
         g.add_edge('a', 'b')
         g.add_edge('c', 'd')
@@ -570,24 +588,35 @@ class TestGroupbyComplexScenarios:
         assert result.has_edge(idx('d', 0), idx('e', 0))
 
     def test_groupby_with_multiple_source_nodes(self) -> None:
-        """Test groupby where graph has multiple source nodes."""
+        """Test groupby where graph has multiple source nodes (no predecessors)."""
         g = nx.DiGraph()
         g.add_edge('a', 'c')
         g.add_edge('b', 'c')
-        # Note: both 'a' and 'b' are source nodes
 
         df = pd.DataFrame({'a': [1, 2], 'b': [10, 20], 'param': ['x', 'y']})
         graph = cb.Graph(g).map(df)
         grouped = graph.groupby('param').reduce('c', name='d')
         result = grouped.to_networkx()
 
-        # Both source nodes should exist
+        # Both source nodes should exist (they have no predecessors)
         assert idx('a', 0) in result.nodes
+        assert idx('a', 1) in result.nodes
         assert idx('b', 0) in result.nodes
+        assert idx('b', 1) in result.nodes
 
         # Grouped nodes
         assert idx('d', 'x', dims=('param',)) in result.nodes
         assert idx('d', 'y', dims=('param',)) in result.nodes
+
+        # Edges from source nodes to c
+        assert result.has_edge(idx('a', 0), idx('c', 0))
+        assert result.has_edge(idx('b', 0), idx('c', 0))
+        assert result.has_edge(idx('a', 1), idx('c', 1))
+        assert result.has_edge(idx('b', 1), idx('c', 1))
+
+        # Edges from c to grouped d nodes
+        assert result.has_edge(idx('c', 0), idx('d', 'x', dims=('param',)))
+        assert result.has_edge(idx('c', 1), idx('d', 'y', dims=('param',)))
 
 
 class TestGroupbyChainedOperations:
@@ -667,7 +696,7 @@ class TestGroupbyChainedOperations:
         assert idx('gb2', 0, dims=('p2',)) in result.nodes
 
     def test_regular_reduce_then_groupby(self) -> None:
-        """Test that regular reduce followed by groupby works."""
+        """Test regular reduce followed by groupby on successor node in same chain."""
         g = nx.DiGraph()
         g.add_edge('a', 'b')
         g.add_edge('b', 'c')
