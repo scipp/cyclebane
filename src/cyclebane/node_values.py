@@ -28,6 +28,10 @@ class NodeValues(Mapping[Hashable, ValueArray]):
             merged = self.merge(values)
             self._values = merged._values
 
+    def __contains__(self, key: Hashable) -> bool:
+        """Return True if the column with the given name exists."""
+        return key in self._values
+
     def copy(self) -> NodeValues:
         """Return a copy of the NodeValues."""
         return NodeValues(dict(self._values))
