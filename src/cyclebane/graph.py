@@ -16,7 +16,7 @@ from .value_array import Grouping
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
     sink_nodes = [node for node in graph.nodes if graph.out_degree(node) == 0]
     if len(sink_nodes) != 1:
-        raise ValueError('Graph must have exactly one sink node')
+        raise ValueError(f'Graph must have exactly one sink node, got {sink_nodes}')
     return sink_nodes[0]
 
 
