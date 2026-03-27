@@ -525,6 +525,9 @@ class Graph:
 
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
+        # Remove node values of the branch, if they exist
+        if _node_name(branch) in self._node_values:
+            del self._node_values[_node_name(branch)]
 
         # Ensure we preserve the node values of the branch, if it exists. This step is
         # necessary since __setitem__ effectively renames the sink node of the input
