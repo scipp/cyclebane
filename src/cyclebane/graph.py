@@ -20,6 +20,51 @@ def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
     return sink_nodes[0]
 
 
+def _labeled_key(
+    graph: nx.DiGraph, key: Hashable, match_index: None | Hashable = None
+) -> Hashable:
+    """Find the node for ``key`` in a labeled graph, by original name if mapped."""
+    if key in graph:
+        return key
+    matches = [
+        node
+        for node in graph.nodes
+        if isinstance(node, MappedNode) and node.name == key
+    ]
+    if match_index is not None:
+        matches = [node for node in matches if match_index in node.indices]
+    if len(matches) == 0:
+        raise KeyError(f"Node '{key}' does not exist in the graph.")
+    if len(matches) > 1:
+        raise KeyError(f"Node '{key}' is ambiguous. Found {matches}.")
+    return matches[0]
+
+
+def _alias_mapped_node(
+    source: Graph,
+    name: Hashable,
+    graph: nx.DiGraph,
+    node_values: NodeValues,
+    reductions: dict[Hashable, _ReduceSpec],
+) -> tuple[nx.DiGraph, NodeValues, dict[Hashable, _ReduceSpec]]:
+    """Relabel the mapped node ``name`` to an explicit :py:class:`MappedNode` alias.
+
+    Used when a new plain node (a reduce result or an assigned branch) shadows
+    a mapped node of the same name, so that both can coexist.
+    """
+    alias = MappedNode(name=name, indices=source.node_indices(name))
+    graph = nx.relabel_nodes(graph, {name: alias})
+    if name in node_values:
+        node_values = node_values.copy()
+        values = node_values[name]
+        del node_values[name]
+        node_values[alias] = values
+    reductions = dict(reductions)
+    if name in reductions:
+        reductions[alias] = reductions.pop(name)
+    return graph, node_values, reductions
+
+
 def _get_new_node_name(graph: nx.DiGraph) -> str:
     while True:
         name = str(uuid4())
@@ -106,10 +151,13 @@ class MappedNode:
     indices: tuple[IndexName, ...]
 
 
-def _node_with_indices(node: Hashable, indices: tuple[IndexName, ...]) -> MappedNode:
-    if isinstance(node, MappedNode):
-        return MappedNode(name=node.name, indices=indices + node.indices)
-    return MappedNode(name=node, indices=indices)
+@dataclass(frozen=True, slots=True)
+class _ReduceSpec:
+    """Records what a reduce node consumes; applied when deriving node indices."""
+
+    index: None | Hashable
+    axis: None | int
+    extra_index_name: None | IndexName
 
 
 def _node_name(node: Hashable) -> Hashable:
@@ -122,17 +170,6 @@ def _node_indices(node: Hashable) -> tuple[IndexName, ...]:
     if isinstance(node, MappedNode):
         return node.indices
     return ()
-
-
-def _find_successors(
-    graph: nx.DiGraph, *, root_nodes: tuple[Hashable]
-) -> set[Hashable]:
-    successors = set()
-    for root in root_nodes:
-        if graph.in_degree(root) > 0:
-            raise ValueError(f"Mapped node '{root}' is not a source node")
-        successors.update(nx.descendants(graph, source=root) | {root})
-    return successors
 
 
 def _rename_successors(
@@ -175,7 +212,11 @@ class PositionalIndexer:
                 for name, col in self.graph._node_values.items()
             }
         )
-        return Graph(self.graph.graph, node_values=node_values)
+        return Graph(
+            self.graph.graph,
+            node_values=node_values,
+            reductions=self.graph._reductions,
+        )
 
 
 MappingToArrayLike = Any  # dict[str, Numpy|DataArray], DataFrame, etc.
@@ -207,7 +248,13 @@ class Graph:
       objects at nodes with multiple predecessors.
     """
 
-    def __init__(self, graph: nx.DiGraph, *, node_values: NodeValues | None = None):
+    def __init__(
+        self,
+        graph: nx.DiGraph,
+        *,
+        node_values: NodeValues | None = None,
+        reductions: dict[Hashable, _ReduceSpec] | None = None,
+    ):
         """
         Initialize a graph from a directed NetworkX graph.
 
@@ -219,12 +266,19 @@ class Graph:
             A mapping from source node names to array-like objects. The implementation
             assumes that the graph has been setup correctly. Do not use this argument
             unless you know what you are doing.
+        reductions:
+            A mapping from reduce-node names to reduce specs. Internal, do not use.
         """
         self.graph = graph
         self._node_values = node_values or NodeValues({})
+        self._reductions = dict(reductions or {})
 
     def copy(self) -> Graph:
-        return Graph(self.graph.copy(), node_values=self._node_values)
+        return Graph(
+            self.graph.copy(),
+            node_values=self._node_values,
+            reductions=self._reductions,
+        )
 
     @property
     def index_names(self) -> tuple[IndexName, ...]:
@@ -262,18 +316,118 @@ class Graph:
         graph = self.graph.copy()
         graph.add_nodes_from(new_values)
 
-        successors = _find_successors(graph, root_nodes=new_values)
-        name_mapping: dict[Hashable, MappedNode] = {}
-        for node in successors:
-            name_mapping[node] = _node_with_indices(node, tuple(new_values.indices))
+        for root in new_values:
+            if graph.in_degree(root) > 0:
+                raise ValueError(f"Mapped node '{root}' is not a source node")
 
+        # Note that the graph is not relabeled: which nodes carry which indices is
+        # derived from the mapped roots and reachability in _derive_indices, at the
+        # time it is needed. This keeps node names stable and makes `map` commute
+        # with adding branches to the graph.
         return Graph(
-            nx.relabel_nodes(graph, name_mapping),
+            graph,
             node_values=self._node_values.merge(new_values),
+            reductions=self._reductions,
         )
 
+    def _derive_indices(self) -> dict[Hashable, tuple[IndexName, ...]]:
+        """Derive the indices carried by each node from mapped roots and reduces.
+
+        A node carries the indices of the mapped roots that reach it, minus what
+        reduce nodes on the way consume. The per-node index order matches what
+        incremental relabeling used to produce: indices of later ``map`` calls
+        first, order within one call preserved; groupby's extra index appended
+        last. Nodes carrying no indices are absent from the result.
+        """
+        if not self._node_values and not self._reductions:
+            # Fast path; also keeps graphs with cycles (which some users allow
+            # until compute time) working as long as nothing is mapped.
+            return {}
+        graph = self.graph
+        if next(iter(nx.selfloop_edges(graph)), None) is not None:
+            # Self-loops can arise from __setitem__ when the new branch contains
+            # its own destination node; propagation ignores them.
+            graph = graph.copy()
+            graph.remove_edges_from(list(nx.selfloop_edges(graph)))
+        root_blocks = {
+            root: arr.index_names
+            for root, arr in self._node_values.items()
+            if arr.get_grouping() is None and root in graph
+        }
+        priority: dict[IndexName, tuple[int, int]] = {}
+        for i, block in enumerate(root_blocks.values()):
+            for pos, name in enumerate(block):
+                priority.setdefault(name, (-i, pos))
+
+        names: dict[Hashable, set[IndexName]] = {}
+        extras: dict[Hashable, tuple[IndexName, ...]] = {}
+        result: dict[Hashable, tuple[IndexName, ...]] = {}
+        for node in nx.topological_sort(graph):
+            current: set[IndexName] = set()
+            extra: tuple[IndexName, ...] = ()
+            for pred in graph.predecessors(node):
+                current |= names[pred]
+                for name in extras[pred]:
+                    if name not in extra:
+                        extra = (*extra, name)
+            if (root_block := root_blocks.get(node)) is not None:
+                current |= set(root_block)
+            if (spec := self._reductions.get(node)) is not None:
+                full = tuple(sorted(current, key=priority.__getitem__)) + extra
+                if spec.index is not None:
+                    drop = {spec.index}
+                elif spec.axis is not None:
+                    drop = {full[spec.axis]}
+                else:
+                    drop = set(full)
+                current -= drop
+                extra = tuple(name for name in extra if name not in drop)
+                if spec.extra_index_name is not None:
+                    extra = (*extra, spec.extra_index_name)
+            names[node] = current
+            extras[node] = extra
+            if full := tuple(sorted(current, key=priority.__getitem__)) + extra:
+                result[node] = full
+        return result
+
+    def _labeled_graph(self) -> nx.DiGraph:
+        """Return a copy of the graph with index-carrying nodes relabeled as
+        :py:class:`MappedNode`, the representation :py:meth:`to_networkx` works on."""
+        mapping = {
+            node: MappedNode(name=_node_name(node), indices=indices)
+            for node, indices in self._derive_indices().items()
+        }
+        return nx.relabel_nodes(self.graph, mapping, copy=True)
+
+    def node_indices(self, key: Hashable) -> tuple[IndexName, ...]:
+        """Return the index names carried by the given node, () if unmapped."""
+        return self._derive_indices().get(key, ())
+
+    def named_indices(self, name: Hashable) -> dict[Hashable, tuple[IndexName, ...]]:
+        """Return indices of all index-carrying nodes with the given public name.
+
+        Contains at most the node ``name`` itself and mapped aliases created
+        where a reduce or branch assignment shadowed a mapped node.
+        """
+        derived = self._derive_indices()
+        return {
+            node: indices
+            for node in self.graph
+            if _node_name(node) == name and (indices := derived.get(node, ()))
+        }
+
+    @property
+    def value_keys(self) -> tuple[Hashable, ...]:
+        """Names of the nodes that have associated (mapped) values."""
+        return tuple(self._node_values)
+
     def groupby(self, node: Hashable) -> GroupbyGraph:
-        return GroupbyGraph(self.graph, node_values=self._node_values, node=node)
+        return GroupbyGraph(
+            self.graph,
+            node_values=self._node_values,
+            node=node,
+            reductions=self._reductions,
+        )
 
     def reduce(
         self,
@@ -311,55 +465,38 @@ class Graph:
         attrs = attrs or {}
         if index is not None and axis is not None:
             raise ValueError('Only one of index and axis can be given')
-        key = self._from_orig_key(key)
-        indices = _node_indices(key)
+        if key not in self.graph:
+            raise KeyError(f"Node '{key}' does not exist in the graph.")
+        # What is reduced is recorded on the node and applied when indices are
+        # derived, but validate eagerly against the currently derivable indices.
+        indices = self.node_indices(key)
         if index is not None and index not in indices:
             raise ValueError(f"Node '{key}' does not have index '{index}'.")
         # TODO We can support indexing from the back in the future.
         if axis is not None and (axis < 0 or axis >= len(indices)):
             raise ValueError(f"Node '{key}' does not have axis '{axis}'.")
-        if index is not None:
-            new_index = tuple(value for value in indices if value != index)
-        elif axis is not None:
-            # TODO Should axis refer to axes of graph, or the node?
-            new_index = tuple(value for i, value in enumerate(indices) if i != axis)
-        else:
-            new_index = None
-        if _extra_index_name is not None:
-            if new_index is None:
-                new_index = (_extra_index_name,)
-            else:
-                new_index = (*new_index, _extra_index_name)
-        if name in self.graph:
-            raise ValueError(f"Node '{name}' already exists in the graph.")
 
         graph = self.graph.copy()
-        name = MappedNode(name=name, indices=new_index) if new_index else name
+        node_values = self._node_values
+        reductions = dict(self._reductions)
+        if name in graph:
+            if not self.node_indices(name):
+                raise ValueError(f"Node '{name}' already exists in the graph.")
+            # The new node shadows a mapped node of the same name (commonly the
+            # reduced node itself). Give the mapped node an explicit alias so
+            # both can coexist; see also __setitem__.
+            graph, node_values, reductions = _alias_mapped_node(
+                self, name, graph, node_values, reductions
+            )
+            if key == name:
+                key = MappedNode(name=name, indices=self.node_indices(name))
         graph.add_node(name, **attrs)
         graph.add_edge(key, name)
 
-        return Graph(graph, node_values=self._node_values)
-
-    def _from_orig_key(
-        self, key: Hashable, match_index: None | Hashable = None
-    ) -> Hashable:
-        # Graph.map relabels nodes to include index names, which can be inconvenient
-        # for the user. Is this convenience of finding the node by its original name
-        # worth the complexity and a good idea?
-        if key not in self.graph:
-            matches = [
-                node
-                for node in self.graph.nodes
-                if isinstance(node, MappedNode) and node.name == key
-            ]
-            if match_index is not None:
-                matches = [node for node in matches if match_index in node.indices]
-            if len(matches) == 0:
-                raise KeyError(f"Node '{key}' does not exist in the graph.")
-            if len(matches) > 1:
-                raise KeyError(f"Node '{key}' is ambiguous. Found {matches}.")
-            return matches[0]
-        return key
+        reductions[name] = _ReduceSpec(
+            index=index, axis=axis, extra_index_name=_extra_index_name
+        )
+        return Graph(graph, node_values=node_values, reductions=reductions)
 
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
         return PositionalIndexer(self, index_name)
@@ -374,7 +511,9 @@ class Graph:
         value_attr:
             The name of the attribute on nodes that holds the array-like object.
         """
-        graph = self.graph.copy()
+        # Nodes carrying indices are stored under their plain names; relabel them
+        # as MappedNode based on the derived indices before spelling out.
+        graph = self._labeled_graph()
 
         # Maintain a list of actual node values, without groupings, since we only want
         # to set the former (user-provided) on (input) nodes.
@@ -389,7 +528,7 @@ class Graph:
         for key, values in self._node_values.items():
             if (grouping := values.get_grouping()) is not None:
                 del node_values[key]
-                key = self._from_orig_key(key, match_index=grouping.group_index_name)
+                key = _labeled_key(graph, key, match_index=grouping.group_index_name)
                 # Note there should be only a single predecessor for the grouping node.
                 groupby_graph = graph.subgraph([*graph.predecessors(key), key]).copy()
                 # Remove edges, or the loop for the regular map/reduce will add
@@ -449,15 +588,16 @@ class Graph:
         """
         if isinstance(key, slice):
             raise NotImplementedError('Only single nodes are supported ')
-        key = self._from_orig_key(key)
+        if key not in self.graph:
+            raise KeyError(f"Node '{key}' does not exist in the graph.")
         ancestors = nx.ancestors(self.graph, key)
         ancestors.add(key)
         # Drop all node values that are not in the branch
-        mapped = {a.name for a in ancestors if isinstance(a, MappedNode)}
-        keep_values = [key for key in self._node_values.keys() if key in mapped]
+        keep_values = [key for key in self._node_values.keys() if key in ancestors]
         return Graph(
             self.graph.subgraph(ancestors),
             node_values=self._node_values.get_columns(keep_values),
+            reductions={k: v for k, v in self._reductions.items() if k in ancestors},
         )
 
     def __delitem__(self, key: Hashable | slice) -> None:
@@ -466,15 +606,16 @@ class Graph:
         """
         if isinstance(key, slice):
             raise NotImplementedError('Only single nodes are supported ')
-        key = self._from_orig_key(key)
-        if isinstance(key, MappedNode):
-            # Not clear what to do in this case, as it would leave a lot of MappedNodes
-            # without a source that could provide data.
+        if key not in self.graph:
+            raise KeyError(f"Node '{key}' does not exist in the graph.")
+        if self.node_indices(key):
+            # Not clear what to do in this case, as it would leave a lot of mapped
+            # nodes without a source that could provide data.
             raise ValueError('Cannot delete mapped node.')
         graph = _remove_ancestors(self.graph, key)
-        mapped = {node.name for node in graph if isinstance(node, MappedNode)}
-        keep_values = [key for key in self._node_values.keys() if key in mapped]
+        keep_values = [key for key in self._node_values.keys() if key in graph]
         self._node_values = self._node_values.get_columns(keep_values)
+        self._reductions = {k: v for k, v in self._reductions.items() if k in graph}
         self.graph = graph
 
     def __setitem__(self, branch: Hashable | slice, other: Graph) -> None:
@@ -492,16 +633,22 @@ class Graph:
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
-        try:
-            # When setting at a MappedNode, allow using underlying node name for
-            # convenience.
-            branch = self._from_orig_key(branch)
-        except KeyError:
-            pass
-        if isinstance(sink, MappedNode) != isinstance(branch, MappedNode):
+        sink_mapped = bool(other.node_indices(sink))
+        branch_mapped = branch in self.graph and bool(self.node_indices(branch))
+        if sink_mapped != branch_mapped:
             raise NotImplementedError(
                 'Trying to set mapped node on non-mapped node (or vice versa) is not '
                 'possible in __setitem__'
+            )
+        other_values = other._node_values
+        other_reductions = dict(other._reductions)
+        if branch in new_branch and branch != sink and other.node_indices(branch):
+            # Renaming the sink to the branch name would merge it with a mapped
+            # node of the same name inside the new branch (commonly when
+            # assigning a reduction of the branch node back to its name). Give
+            # the mapped node an explicit alias so both can coexist.
+            new_branch, other_values, other_reductions = _alias_mapped_node(
+                other, branch, new_branch, other_values, other_reductions
             )
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
         if branch in self.graph:
@@ -524,7 +671,12 @@ class Graph:
         graph = nx.compose(graph, new_branch)
 
         # Delay setting graph until we know no step fails
-        self._node_values = self._node_values.merge(other._node_values)
+        self._node_values = self._node_values.merge(other_values)
+        reductions = {**self._reductions, **other_reductions}
+        if sink in reductions and sink != branch:
+            # The sink was renamed to the branch name above.
+            reductions[branch] = reductions.pop(sink)
+        self._reductions = reductions
 
         # Ensure we preserve the node values of the branch, if it exists. This step is
         # necessary since __setitem__ effectively renames the sink node of the input
@@ -547,9 +699,16 @@ class GroupbyGraph:
     """
 
     # TODO Should we support a custom new dim name here, instead of using `node`?
-    def __init__(self, graph: nx.DiGraph, node_values: NodeValues, node: Hashable):
+    def __init__(
+        self,
+        graph: nx.DiGraph,
+        node_values: NodeValues,
+        node: Hashable,
+        reductions: dict[Hashable, _ReduceSpec] | None = None,
+    ):
         self._graph = graph
         self._node_values = node_values
+        self._reductions = dict(reductions or {})
         values_to_group_by = node_values[node]
         self._group_index_name = node
         self._index_name = values_to_group_by.index_names[0]
@@ -582,7 +741,7 @@ class GroupbyGraph:
         # e.g., __getitem__, which needs to decided what subset of node values to keep
         # when returning a subgraph.
         node_values = self._node_values.merge({name: self._groups})
-        graph = Graph(self._graph, node_values=node_values)
+        graph = Graph(self._graph, node_values=node_values, reductions=self._reductions)
         return graph.reduce(
             key=key,
             index=self._index_name,
