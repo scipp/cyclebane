@@ -40,31 +40,6 @@ def _labeled_key(
     return matches[0]
 
 
-def _alias_mapped_node(
-    source: Graph,
-    name: Hashable,
-    graph: nx.DiGraph,
-    node_values: NodeValues,
-    reductions: dict[Hashable, _ReduceSpec],
-) -> tuple[nx.DiGraph, NodeValues, dict[Hashable, _ReduceSpec]]:
-    """Relabel the mapped node ``name`` to an explicit :py:class:`MappedNode` alias.
-
-    Used when a new plain node (a reduce result or an assigned branch) shadows
-    a mapped node of the same name, so that both can coexist.
-    """
-    alias = MappedNode(name=name, indices=source.node_indices(name))
-    graph = nx.relabel_nodes(graph, {name: alias})
-    if name in node_values:
-        node_values = node_values.copy()
-        values = node_values[name]
-        del node_values[name]
-        node_values[alias] = values
-    reductions = dict(reductions)
-    if name in reductions:
-        reductions[alias] = reductions.pop(name)
-    return graph, node_values, reductions
-
-
 def _get_new_node_name(graph: nx.DiGraph) -> str:
     while True:
         name = str(uuid4())
@@ -344,11 +319,6 @@ class Graph:
             # until compute time) working as long as nothing is mapped.
             return {}
         graph = self.graph
-        if next(iter(nx.selfloop_edges(graph)), None) is not None:
-            # Self-loops can arise from __setitem__ when the new branch contains
-            # its own destination node; propagation ignores them.
-            graph = graph.copy()
-            graph.remove_edges_from(list(nx.selfloop_edges(graph)))
         root_blocks = {
             root: arr.index_names
             for root, arr in self._node_values.items()
@@ -394,7 +364,7 @@ class Graph:
         """Return a copy of the graph with index-carrying nodes relabeled as
         :py:class:`MappedNode`, the representation :py:meth:`to_networkx` works on."""
         mapping = {
-            node: MappedNode(name=_node_name(node), indices=indices)
+            node: MappedNode(name=node, indices=indices)
             for node, indices in self._derive_indices().items()
         }
         return nx.relabel_nodes(self.graph, mapping, copy=True)
@@ -402,19 +372,6 @@ class Graph:
     def node_indices(self, key: Hashable) -> tuple[IndexName, ...]:
         """Return the index names carried by the given node, () if unmapped."""
         return self._derive_indices().get(key, ())
-
-    def named_indices(self, name: Hashable) -> dict[Hashable, tuple[IndexName, ...]]:
-        """Return indices of all index-carrying nodes with the given public name.
-
-        Contains at most the node ``name`` itself and mapped aliases created
-        where a reduce or branch assignment shadowed a mapped node.
-        """
-        derived = self._derive_indices()
-        return {
-            node: indices
-            for node in self.graph
-            if _node_name(node) == name and (indices := derived.get(node, ()))
-        }
 
     @property
     def value_keys(self) -> tuple[Hashable, ...]:
@@ -476,27 +433,18 @@ class Graph:
         if axis is not None and (axis < 0 or axis >= len(indices)):
             raise ValueError(f"Node '{key}' does not have axis '{axis}'.")
 
+        if name in self.graph:
+            raise ValueError(f"Node '{name}' already exists in the graph.")
+
         graph = self.graph.copy()
-        node_values = self._node_values
-        reductions = dict(self._reductions)
-        if name in graph:
-            if not self.node_indices(name):
-                raise ValueError(f"Node '{name}' already exists in the graph.")
-            # The new node shadows a mapped node of the same name (commonly the
-            # reduced node itself). Give the mapped node an explicit alias so
-            # both can coexist; see also __setitem__.
-            graph, node_values, reductions = _alias_mapped_node(
-                self, name, graph, node_values, reductions
-            )
-            if key == name:
-                key = MappedNode(name=name, indices=self.node_indices(name))
         graph.add_node(name, **attrs)
         graph.add_edge(key, name)
 
+        reductions = dict(self._reductions)
         reductions[name] = _ReduceSpec(
             index=index, axis=axis, extra_index_name=_extra_index_name
         )
-        return Graph(graph, node_values=node_values, reductions=reductions)
+        return Graph(graph, node_values=self._node_values, reductions=reductions)
 
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
         return PositionalIndexer(self, index_name)
@@ -633,22 +581,26 @@ class Graph:
             raise TypeError(f'Expected {Graph}, got {type(other)}')
         new_branch = other.graph
         sink = _get_unique_sink(new_branch)
-        sink_mapped = bool(other.node_indices(sink))
-        branch_mapped = branch in self.graph and bool(self.node_indices(branch))
-        if sink_mapped != branch_mapped:
+        # Replacing an existing branch must not change whether it is mapped, as
+        # this would silently change the indices of its dependents. Setting a
+        # new branch is fine either way; its indices follow from derivation.
+        if branch in self.graph and bool(other.node_indices(sink)) != bool(
+            self.node_indices(branch)
+        ):
             raise NotImplementedError(
                 'Trying to set mapped node on non-mapped node (or vice versa) is not '
                 'possible in __setitem__'
             )
-        other_values = other._node_values
-        other_reductions = dict(other._reductions)
-        if branch in new_branch and branch != sink and other.node_indices(branch):
-            # Renaming the sink to the branch name would merge it with a mapped
-            # node of the same name inside the new branch (commonly when
-            # assigning a reduction of the branch node back to its name). Give
-            # the mapped node an explicit alias so both can coexist.
-            new_branch, other_values, other_reductions = _alias_mapped_node(
-                other, branch, new_branch, other_values, other_reductions
+        if branch in new_branch and branch != sink:
+            # Renaming the sink to the branch name would silently merge it with
+            # the like-named node inside the new branch. This typically means
+            # the new branch computes the branch node from itself (e.g. a
+            # reduction of a mapped branch assigned back to the same name);
+            # rename the node inside the new branch to make this well-defined.
+            raise ValueError(
+                f"Cannot set branch '{branch}': the new branch already contains "
+                f"a node of that name. Use a distinct name for the node inside "
+                "the new branch."
             )
         new_branch = nx.relabel_nodes(new_branch, {sink: branch})
         if branch in self.graph:
@@ -671,8 +623,8 @@ class Graph:
         graph = nx.compose(graph, new_branch)
 
         # Delay setting graph until we know no step fails
-        self._node_values = self._node_values.merge(other_values)
-        reductions = {**self._reductions, **other_reductions}
+        self._node_values = self._node_values.merge(other._node_values)
+        reductions = {**self._reductions, **other._reductions}
         if sink in reductions and sink != branch:
             # The sink was renamed to the branch name above.
             reductions[branch] = reductions.pop(sink)

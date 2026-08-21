@@ -441,8 +441,9 @@ class TestGroupbyIntegration:
         graph1 = cb.Graph(g1).map(df)
         graph2 = cb.Graph(g2).map(df)
 
-        # Combine graphs
-        graph1['c'] = graph2['d']
+        # Combine graphs. Note that using 'c' as the target name would raise,
+        # since the branch contains its mapped source node 'c'.
+        graph1['d'] = graph2['d']
 
         # Groupby on combined graph
         grouped = graph1.groupby('param').reduce('b', name='reduced')
