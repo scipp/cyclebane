@@ -20,19 +20,17 @@ def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
     return sink_nodes[0]
 
 
-def _labeled_key(
-    graph: nx.DiGraph, key: Hashable, match_index: None | Hashable = None
-) -> Hashable:
+def _labeled_key(graph: nx.DiGraph, key: Hashable, match_index: Hashable) -> Hashable:
     """Find the node for ``key`` in a labeled graph, by original name if mapped."""
     if key in graph:
         return key
     matches = [
         node
         for node in graph.nodes
-        if isinstance(node, MappedNode) and node.name == key
+        if isinstance(node, MappedNode)
+        and node.name == key
+        and match_index in node.indices
     ]
-    if match_index is not None:
-        matches = [node for node in matches if match_index in node.indices]
     if len(matches) == 0:
         raise KeyError(f"Node '{key}' does not exist in the graph.")
     if len(matches) > 1:
@@ -128,10 +126,13 @@ class MappedNode:
 
 @dataclass(frozen=True, slots=True)
 class _ReduceSpec:
-    """Records what a reduce node consumes; applied when deriving node indices."""
+    """Records what a reduce node consumes; applied when deriving node indices.
 
-    index: None | Hashable
-    axis: None | int
+    The index names to drop are resolved when ``reduce`` is called, so that
+    indices added by later ``map`` calls flow through the reduce node.
+    """
+
+    drop: frozenset[IndexName]
     extra_index_name: None | IndexName
 
 
@@ -269,9 +270,10 @@ class Graph:
         """
         Map the graph over the given values by associating source nodes with values.
 
-        All successors of the mapped source nodes are replaced with new nodes, one for
-        each index value. The value is set as an attribute on the new source nodes
-        (but not their successors).
+        The mapped source nodes and their successors gain an index (dimension).
+        This only records the values and indices; nodes are spelled out into one
+        copy per index value in :py:meth:`to_networkx`, with values set as an
+        attribute on the source-node copies.
 
         Parameters
         ----------
@@ -343,15 +345,8 @@ class Graph:
             if (root_block := root_blocks.get(node)) is not None:
                 current |= set(root_block)
             if (spec := self._reductions.get(node)) is not None:
-                full = tuple(sorted(current, key=priority.__getitem__)) + extra
-                if spec.index is not None:
-                    drop = {spec.index}
-                elif spec.axis is not None:
-                    drop = {full[spec.axis]}
-                else:
-                    drop = set(full)
-                current -= drop
-                extra = tuple(name for name in extra if name not in drop)
+                current -= spec.drop
+                extra = tuple(name for name in extra if name not in spec.drop)
                 if spec.extra_index_name is not None:
                     extra = (*extra, spec.extra_index_name)
             names[node] = current
@@ -375,7 +370,11 @@ class Graph:
 
     @property
     def value_keys(self) -> tuple[Hashable, ...]:
-        """Names of the nodes that have associated (mapped) values."""
+        """Names of the nodes that have associated values.
+
+        Contains the mapped source nodes, and the reduce nodes of groupby
+        operations (which store the grouping).
+        """
         return tuple(self._node_values)
 
     def groupby(self, node: Hashable) -> GroupbyGraph:
@@ -404,8 +403,8 @@ class Graph:
         Parameters
         ----------
         key:
-            The name of the source node to reduce. This is the original name prior to
-            mapping. If not given, tries to find a unique sink node.
+            The name of the node to reduce. If not given, tries to find a unique
+            sink node.
         index:
             The name of the index to reduce over. Only one of index and axis can be
             given.
@@ -424,14 +423,20 @@ class Graph:
             raise ValueError('Only one of index and axis can be given')
         if key not in self.graph:
             raise KeyError(f"Node '{key}' does not exist in the graph.")
-        # What is reduced is recorded on the node and applied when indices are
-        # derived, but validate eagerly against the currently derivable indices.
+        # Resolve what is reduced into concrete index names now; indices added
+        # by later `map` calls are unaffected and flow through the reduce node.
         indices = self.node_indices(key)
-        if index is not None and index not in indices:
-            raise ValueError(f"Node '{key}' does not have index '{index}'.")
-        # TODO We can support indexing from the back in the future.
-        if axis is not None and (axis < 0 or axis >= len(indices)):
-            raise ValueError(f"Node '{key}' does not have axis '{axis}'.")
+        if index is not None:
+            if index not in indices:
+                raise ValueError(f"Node '{key}' does not have index '{index}'.")
+            drop = frozenset({index})
+        elif axis is not None:
+            # TODO We can support indexing from the back in the future.
+            if axis < 0 or axis >= len(indices):
+                raise ValueError(f"Node '{key}' does not have axis '{axis}'.")
+            drop = frozenset({indices[axis]})
+        else:
+            drop = frozenset(indices)
 
         if name in self.graph:
             raise ValueError(f"Node '{name}' already exists in the graph.")
@@ -441,9 +446,7 @@ class Graph:
         graph.add_edge(key, name)
 
         reductions = dict(self._reductions)
-        reductions[name] = _ReduceSpec(
-            index=index, axis=axis, extra_index_name=_extra_index_name
-        )
+        reductions[name] = _ReduceSpec(drop=drop, extra_index_name=_extra_index_name)
         return Graph(graph, node_values=self._node_values, reductions=reductions)
 
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
@@ -624,7 +627,10 @@ class Graph:
 
         # Delay setting graph until we know no step fails
         self._node_values = self._node_values.merge(other._node_values)
-        reductions = {**self._reductions, **other._reductions}
+        reductions = dict(self._reductions)
+        # A reduce spec of a replaced branch node must not survive replacement.
+        reductions.pop(branch, None)
+        reductions.update(other._reductions)
         if sink in reductions and sink != branch:
             # The sink was renamed to the branch name above.
             reductions[branch] = reductions.pop(sink)
@@ -633,10 +639,10 @@ class Graph:
         # Ensure we preserve the node values of the branch, if it exists. This step is
         # necessary since __setitem__ effectively renames the sink node of the input
         # graph to the branch name.
-        if _node_name(sink) in self._node_values:
-            node_values = self._node_values[_node_name(sink)]
-            del self._node_values[_node_name(sink)]
-            self._node_values[_node_name(branch)] = node_values
+        if sink in self._node_values:
+            node_values = self._node_values[sink]
+            del self._node_values[sink]
+            self._node_values[branch] = node_values
 
         self.graph = graph
 
@@ -680,8 +686,8 @@ class GroupbyGraph:
         Parameters
         ----------
         key:
-            The name of the source node to reduce. This is the original name prior to
-            mapping. If not given, tries to find a unique sink node.
+            The name of the node to reduce. If not given, tries to find a unique
+            sink node.
         name:
             The name of the new node. If not given, a unique name is generated.
         attrs:

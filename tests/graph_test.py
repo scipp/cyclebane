@@ -1102,3 +1102,38 @@ def test_node_attrs_are_preserved_in_map() -> None:
     assert result.nodes[idx('b', 0)] == {'attr': 22}
     assert result.nodes[idx('b', 1)] == {'attr': 22}
     assert result.nodes[idx('b', 2)] == {'attr': 22}
+
+
+def test_map_after_axis_reduce_leaves_new_index_on_reduce_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+    graph = cb.Graph(g).map({'a': [1, 2]})
+    graph = graph.reduce('c', axis=0, name='r')
+    assert graph.node_indices('r') == ()
+    # The reduce consumed a's index; b's index, added later, flows through.
+    graph = graph.map({'b': [10, 20, 30]})
+    assert graph.node_indices('r') == ('dim_1',)
+
+
+def test_map_after_full_reduce_leaves_new_index_on_reduce_node() -> None:
+    g = nx.DiGraph()
+    g.add_edge('a', 'c')
+    g.add_edge('b', 'c')
+    graph = cb.Graph(g).map({'a': [1, 2]})
+    graph = graph.reduce('c', name='r')
+    graph = graph.map({'b': [10, 20, 30]})
+    assert graph.node_indices('r') == ('dim_1',)
+
+
+def test_setitem_replacing_reduce_node_discards_its_reduction() -> None:
+    g = nx.DiGraph()
+    g.add_edges_from([('a', 'c'), ('b', 'c')])
+    graph = cb.Graph(g)
+    graph = graph.map(pd.DataFrame({'a': [1, 2]}).rename_axis('x'))
+    graph = graph.map(pd.DataFrame({'b': [3, 4]}).rename_axis('y'))
+    graph = graph.reduce('c', index='x', name='r')
+    assert graph.node_indices('r') == ('y',)
+    # Replace the reduce node by the plain mapped branch; the reduction is gone.
+    graph['r'] = graph['c']
+    assert graph.node_indices('r') == ('y', 'x')
