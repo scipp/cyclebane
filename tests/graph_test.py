@@ -431,7 +431,9 @@ def test_reduce_raises_if_new_node_name_exists() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
-    with pytest.raises(ValueError, match="Node 'other' already exists in the graph."):
+    with pytest.raises(
+        ValueError, match=re.escape("Node 'other' already exists in the graph.")
+    ):
         mapped.reduce(name='other')
 
 
@@ -597,7 +599,7 @@ def test_delitem_raises_when_removing_mapped_node() -> None:
 
     graph = cb.Graph(g)
     mapped = graph.map({'a': [1, 2, 3]})
-    with pytest.raises(ValueError, match="Cannot delete mapped node."):
+    with pytest.raises(ValueError, match=re.escape("Cannot delete mapped node.")):
         del mapped['b']
 
 
