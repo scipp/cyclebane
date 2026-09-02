@@ -162,10 +162,6 @@ html_theme_options = {
     "header_links_before_dropdown": 4,
     "pygment_light_style": "github-light-high-contrast",
     "pygment_dark_style": "github-dark-high-contrast",
-    "logo": {
-        "image_light": "_static/logo.svg",
-        "image_dark": "_static/logo-dark.svg",
-    },
     "external_links": [
         {"name": "Sciline", "url": "https://scipp.github.io/sciline"},
     ],
@@ -200,8 +196,6 @@ html_sidebars = {
 }
 
 html_title = "Cyclebane"
-html_logo = "_static/logo.svg"
-html_favicon = "_static/favicon.ico"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

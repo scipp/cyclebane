@@ -1,27 +1,4 @@
-:::{image} _static/logo.svg
-:class: only-light
-:alt: Cyclebane
-:width: 60%
-:align: center
-:::
-:::{image} _static/logo-dark.svg
-:class: only-dark
-:alt: Cyclebane
-:width: 60%
-:align: center
-:::
-
-```{raw} html
-   <style>
-    .transparent {display: none; visibility: hidden;}
-    .transparent + a.headerlink {display: none; visibility: hidden;}
-   </style>
-```
-
-```{role} transparent
-```
-
-# {transparent}`Cyclebane`
+# Cyclebane
 
 <div style="font-size:1.2em;font-style:italic;color:var(--pst-color-text-muted);text-align:center;">
   Transform directed acyclic graphs using map-reduce and groupby operations
