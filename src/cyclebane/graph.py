@@ -13,6 +13,38 @@ from .node_values import IndexName, IndexValue, NodeValues
 from .value_array import Grouping
 
 
+def _uncached(name: str) -> property:
+    """Return an uncached version of one of the cached properties of `nx.DiGraph`."""
+    return property(getattr(nx.DiGraph, name).func)
+
+
+class DiGraph(nx.DiGraph):
+    """
+    A NetworkX DiGraph that does not cache its report views.
+
+    NetworkX caches views such as ``G.edges`` or ``G.out_degree`` in ``G.__dict__``.
+    Each of those views holds a reference back to ``G``, i.e., merely looking at a
+    graph places it in a reference cycle, so it can be freed only by the cyclic
+    garbage collector. That collector is triggered by the *number* of allocated
+    objects, so a handful of graphs holding large node data may survive for a long
+    time. Cyclebane builds and discards graphs in most of its operations, and the node
+    data can be arbitrarily large, which would lead to unbounded memory growth in,
+    e.g., streaming applications. The views are cheap to create, so not caching them
+    keeps every graph reclaimable by reference counting.
+
+    As a consequence the views are not identical across accesses. They compare equal
+    where NetworkX defines equality for them, but the degree views do not, i.e.,
+    ``G.degree == G.degree`` is False.
+    """
+
+    edges = _uncached('edges')
+    out_edges = _uncached('out_edges')
+    in_edges = _uncached('in_edges')
+    degree = _uncached('degree')
+    out_degree = _uncached('out_degree')
+    in_degree = _uncached('in_degree')
+
+
 def _get_unique_sink(graph: nx.DiGraph) -> Hashable:
     sink_nodes = [node for node in graph.nodes if graph.out_degree(node) == 0]
     if len(sink_nodes) != 1:
@@ -214,13 +246,14 @@ class Graph:
         Parameters
         ----------
         graph:
-            The directed graph representing the data flow.
+            The directed graph representing the data flow. Unless it is a
+            :py:class:`DiGraph`, a copy is made, as for `nx.DiGraph.copy`.
         node_values:
             A mapping from source node names to array-like objects. The implementation
             assumes that the graph has been setup correctly. Do not use this argument
             unless you know what you are doing.
         """
-        self.graph = graph
+        self.graph = graph if isinstance(graph, DiGraph) else DiGraph(graph)
         self._node_values = node_values or NodeValues({})
 
     def copy(self) -> Graph:
@@ -364,7 +397,7 @@ class Graph:
     def by_position(self, index_name: IndexName) -> PositionalIndexer:
         return PositionalIndexer(self, index_name)
 
-    def to_networkx(self, value_attr: str = 'value') -> nx.DiGraph:
+    def to_networkx(self, value_attr: str = 'value') -> DiGraph:
         """
         Convert to a NetworkX graph, spelling out the internal array structures as
         explicit nodes.
